@@ -17,31 +17,41 @@ from data import calculate_ema
 logger = logging.getLogger(__name__)
 
 
-def is_uptrend(candles, idx):
+def is_uptrend(candles, idx, config=None):
     """
     Prüft Aufwärtstrend: Schlusskurs über EMA(50).
     idx ist die Kerze, auf der wir den Trend prüfen.
     """
-    if idx < TREND_EMA_PERIOD:
+    if config is None:
+        import config as cfg
+    else:
+        cfg = config
+    
+    if idx < cfg.TREND_EMA_PERIOD:
         logger.debug(f"Zu wenige Kerzen für EMA-Berechnung (idx={idx})")
         return False
     
     close = candles["close"].iloc[:idx + 1]
-    ema = calculate_ema(close, TREND_EMA_PERIOD)
+    ema = calculate_ema(close, cfg.TREND_EMA_PERIOD)
     
     return bool(candles["close"].iloc[idx] > ema.iloc[idx])
 
 
-def is_downtrend(candles, idx):
+def is_downtrend(candles, idx, config=None):
     """
     Prüft Abwärtstrend: Schlusskurs unter EMA(50).
     """
-    if idx < TREND_EMA_PERIOD:
+    if config is None:
+        import config as cfg
+    else:
+        cfg = config
+    
+    if idx < cfg.TREND_EMA_PERIOD:
         logger.debug(f"Zu wenige Kerzen für EMA-Berechnung (idx={idx})")
         return False
     
     close = candles["close"].iloc[:idx + 1]
-    ema = calculate_ema(close, TREND_EMA_PERIOD)
+    ema = calculate_ema(close, cfg.TREND_EMA_PERIOD)
     
     return bool(candles["close"].iloc[idx] < ema.iloc[idx])
 
@@ -73,7 +83,7 @@ def get_pattern_extremes(candles, pattern_name, idx):
     return pattern_candles["low"].min(), pattern_candles["high"].max()
 
 
-def calculate_sl_tp(candles, atrs, pattern_name, signal_type, idx):
+def calculate_sl_tp(candles, atrs, pattern_name, signal_type, idx, config=None):
     """
     Berechnet Stop-Loss und Take-Profit für ein Signal.
     
@@ -83,39 +93,45 @@ def calculate_sl_tp(candles, atrs, pattern_name, signal_type, idx):
         pattern_name: Name des Musters
         signal_type: "BUY" oder "SELL"
         idx: Index der letzten Musterkerze
+        config: Optional config module
     
     Returns:
         Dict mit "entry", "sl", "tp", "risk_pips", "crv" oder None wenn zu kleines Signal
     """
+    if config is None:
+        import config as cfg
+    else:
+        cfg = config
+    
     entry = candles["close"].iloc[idx]
     atr = atrs.iloc[idx]
     min_low, max_high = get_pattern_extremes(candles, pattern_name, idx)
     
     if signal_type == "BUY":
         # SL unter dem Tief des Musters
-        sl = min_low - SL_BUFFER_ATR * atr
+        sl = min_low - cfg.SL_BUFFER_ATR * atr
         risk = entry - sl
     else:  # SELL
         # SL über dem Hoch des Musters
-        sl = max_high + SL_BUFFER_ATR * atr
+        sl = max_high + cfg.SL_BUFFER_ATR * atr
         risk = sl - entry
     
     # Risiko in Pips
-    risk_pips = risk / PIP_SIZE
+    risk_pips = risk / cfg.PIP_SIZE
     
     # Zu kleines Signal?
-    if risk_pips < MIN_SL_PIPS:
+    if risk_pips < cfg.MIN_SL_PIPS:
         logger.warning(
             f"Signal zu klein: {pattern_name} {signal_type} "
-            f"risk={risk_pips:.2f} Pips < MIN_SL_PIPS={MIN_SL_PIPS}"
+            f"risk={risk_pips:.2f} Pips < MIN_SL_PIPS={cfg.MIN_SL_PIPS}"
         )
         return None
     
     # Take-Profit
     if signal_type == "BUY":
-        tp = entry + RISK_REWARD * risk
+        tp = entry + cfg.RISK_REWARD * risk
     else:  # SELL
-        tp = entry - RISK_REWARD * risk
+        tp = entry - cfg.RISK_REWARD * risk
     
     # Auf 5 Dezimalstellen runden
     entry = round(entry, 5)
@@ -127,30 +143,35 @@ def calculate_sl_tp(candles, atrs, pattern_name, signal_type, idx):
         "sl": sl,
         "tp": tp,
         "risk_pips": round(risk_pips, 2),
-        "crv": round(RISK_REWARD, 1),
+        "crv": round(cfg.RISK_REWARD, 1),
     }
 
 
-def evaluate_pattern(candles, atrs, pattern_name, signal_type, idx):
+def evaluate_pattern(candles, atrs, pattern_name, signal_type, idx, config=None):
     """
     Bewertet ein Muster: Trend-Filter + SL/TP-Berechnung.
     
     Returns:
         Dict mit Pattern-Info oder None wenn gefiltert
     """
+    if config is None:
+        import config as cfg
+    else:
+        cfg = config
+    
     # Trend-Filter: auf Kerze VOR dem Muster (idx - 1)
     trend_idx = max(0, idx - 1)
     
-    if signal_type == "BUY" and not is_downtrend(candles, trend_idx):
+    if signal_type == "BUY" and not is_downtrend(candles, trend_idx, cfg):
         logger.debug(f"BUY-Signal gefiltert: kein Abwärtstrend bei idx={trend_idx}")
         return None
     
-    if signal_type == "SELL" and not is_uptrend(candles, trend_idx):
+    if signal_type == "SELL" and not is_uptrend(candles, trend_idx, cfg):
         logger.debug(f"SELL-Signal gefiltert: kein Aufwärtstrend bei idx={trend_idx}")
         return None
     
     # SL/TP berechnen
-    sl_tp = calculate_sl_tp(candles, atrs, pattern_name, signal_type, idx)
+    sl_tp = calculate_sl_tp(candles, atrs, pattern_name, signal_type, idx, cfg)
     if sl_tp is None:
         return None
     

@@ -406,17 +406,21 @@ PATTERNS = {
 }
 
 
-def detect_patterns(candles, atrs):
+def detect_patterns(candles, atrs, config=None):
     """
     Prüft alle Muster auf den letzten Kerzen.
     
     Args:
         candles: DataFrame mit open, high, low, close (Index: timestamp)
         atrs: Series mit ATR-Werten
+        config: Optional config module (default: import config)
     
     Returns:
         List von Dicts: [{"pattern": name, "signal": "BUY"|"SELL", "idx": index}, ...]
     """
+    if config is None:
+        import config
+    
     signals = []
     
     for pattern_name, (func, signal_type, min_bars) in PATTERNS.items():

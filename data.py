@@ -11,9 +11,14 @@ from config import SYMBOL, INTERVAL, LOOKBACK_CANDLES
 logger = logging.getLogger(__name__)
 
 
-def get_candles(lookback=LOOKBACK_CANDLES):
+def get_candles(symbol=SYMBOL, interval=INTERVAL, lookback=LOOKBACK_CANDLES):
     """
     Holt die letzten `lookback` geschlossenen 15m-Kerzen von yfinance.
+    
+    Args:
+        symbol: yfinance Symbol (z.B. "EURUSD=X", "GBPUSD=X")
+        interval: Kerzenlänge (z.B. "15m")
+        lookback: Anzahl Kerzen zum Abholen
     
     Returns:
         pd.DataFrame mit Columns: open, high, low, close (Index: timestamp UTC)
@@ -24,10 +29,10 @@ def get_candles(lookback=LOOKBACK_CANDLES):
     - Wird später in main.py verworfen, wenn sie nicht geschlossen ist.
     """
     try:
-        logger.info(f"Holen Kerzen: {SYMBOL} {INTERVAL} lookback={lookback}")
+        logger.info(f"Holen Kerzen: {symbol} {interval} lookback={lookback}")
         df = yf.download(
-            SYMBOL,
-            interval=INTERVAL,
+            symbol,
+            interval=interval,
             period=None,  # Unlimited history
             progress=False,
             prepost=False,  # Kein Pre/Post-Market für Forex
@@ -73,17 +78,21 @@ def remove_incomplete_candle(df):
     return df
 
 
-def calculate_atr(df, period=14):
+def calculate_atr(df, period=None):
     """
     Berechnet Average True Range (ATR) zur Messung der Volatilität.
     
     Args:
         df: DataFrame mit high, low, close
-        period: ATR-Periode (Standard: 14)
+        period: ATR-Periode (Standard: 14, oder aus config)
     
     Returns:
         Series mit ATR-Werten
     """
+    if period is None:
+        from config import ATR_PERIOD
+        period = ATR_PERIOD
+    
     high = df["high"]
     low = df["low"]
     close = df["close"]

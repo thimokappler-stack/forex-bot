@@ -38,23 +38,27 @@ def load_mail_config():
     }
 
 
-def send_signal(signal, candles):
+def send_signal(signal, candles, config=None):
     """
     Sendet ein Signal per E-Mail.
     
     Args:
-        signal: Dict mit pattern, signal, timestamp, entry, sl, tp, risk_pips, crv
+        signal: Dict mit pattern, signal, timestamp, entry, sl, tp, risk_pips, crv, symbol (optional)
         candles: DataFrame mit Kerzen (für Kontext)
+        config: Optional config module
     
     Returns:
         True bei Erfolg, False bei Fehler
     """
-    config = load_mail_config()
-    if config is None:
+    mail_config = load_mail_config()
+    if mail_config is None:
         return False
     
+    # Symbol aus Signal oder Default
+    symbol = signal.get("symbol", "EUR/USD")
+    
     # E-Mail zusammenstellen
-    subject = f"{signal['signal']} EUR/USD – {signal['pattern']} (15m)"
+    subject = f"{signal['signal']} {symbol} – {signal['pattern']} (15m)"
     
     timestamp_utc = signal["timestamp"]
     local_tz = os.getenv("TZ", "UTC")
@@ -83,14 +87,14 @@ Forex-Handel mit Hebel ist hochriskant.
     
     try:
         msg = MIMEMultipart()
-        msg["From"] = config["user"]
-        msg["To"] = config["to"]
+        msg["From"] = mail_config["user"]
+        msg["To"] = mail_config["to"]
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
         
         # Gmail SMTP
         server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-        server.login(config["user"], config["password"])
+        server.login(mail_config["user"], mail_config["password"])
         server.send_message(msg)
         server.quit()
         
