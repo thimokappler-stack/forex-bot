@@ -1,0 +1,283 @@
+# EUR/USD Candlestick Signal Bot
+
+Ein Python-Bot, der den EUR/USD-Chart (15-Minuten-Kerzen) auf klassische Candlestick-Muster prüft und bei Erkennung eines Musters ein **Kauf- oder Verkaufssignal per E-Mail** versendet. Der Bot ist **nur ein Signalgeber** – er platziert keine Orders und führt keinen automatischen Handel durch.
+
+## Features
+
+- **10 Candlestick-Muster** (2-, 3- und 5-Kerzen-Muster)
+- **Trendfilter** (EMA-basiert)
+- **Stop-Loss & Take-Profit** automatisch berechnet
+- **Duplikat-Schutz** (state.json)
+- **E-Mail-Versand** via Gmail (mit 2FA App-Passwort)
+- **Backtest-Modus** zur Validierung der Regeln
+- **Vollständige Test-Suite** (pytest)
+- **Raspberry Pi ready** (Cron-Automation)
+
+## Installation
+
+### 1. Repo klonen / Projekt-Folder erstellen
+
+```bash
+cd /home/pi  # oder lokal
+mkdir forex-bot && cd forex-bot
+```
+
+### 2. Virtual Environment & Dependencies
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 3. E-Mail-Konfiguration
+
+Kopiere `.env.example` zu `.env` und fülle die Werte:
+
+```bash
+cp .env.example .env
+# Editiere .env:
+# MAIL_USER=deine.adresse@gmail.com
+# MAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx  (Google App-Passwort!)
+# MAIL_TO=empfaenger@example.com
+```
+
+**Wichtig:** Für Gmail benötigst du:
+1. 2-Faktor-Authentifizierung aktivieren
+2. Ein [Google App-Passwort](https://myaccount.google.com/apppasswords) generieren
+3. Dieses in `MAIL_APP_PASSWORD` einfügen (nicht dein normales Passwort!)
+
+## Verwendung
+
+### Live-Modus
+
+Der Bot lädt die letzten ~100 Kerzen, prüft alle Muster und versendet ein Signal, wenn ein Muster + Trendfilter passt:
+
+```bash
+python main.py
+```
+
+Die Ausgabe geht in `bot.log` und zur Console. Jedes Signal wird in `state.json` gespeichert (Duplikat-Schutz).
+
+### Backtest
+
+Lädt maximal verfügbare 15m-Historie (etwa 60 Tage) und simuliert alle Trades:
+
+```bash
+python backtest.py
+```
+
+Ausgabe: Tabelle mit für jedes Muster:
+- Anzahl Signale
+- Anteil TP / SL / Timeout
+- Durchschnittliches Ergebnis in R (TP = +2, SL = -1, etc.)
+
+### Tests
+
+```bash
+pytest tests/
+# oder einzeln:
+pytest tests/test_patterns.py -v
+```
+
+Prüft alle Muster, Trend-Filter, SL/TP-Berechnung und Duplikat-Schutz.
+
+## Projektstruktur
+
+```
+.
+├── config.py           # Zentrale Konfiguration (Startwerte)
+├── data.py             # yfinance-Datenabruf, ATR, EMA
+├── patterns.py         # 10 Muster-Erkennungsfunktionen
+├── signals.py          # Muster + Trend → Signal, SL/TP-Berechnung
+├── notify.py           # E-Mail-Versand (Gmail SMTP)
+├── main.py             # Live-Einstiegspunkt (Cron)
+├── backtest.py         # Backtest-Simulator
+├── tests/
+│   └── test_patterns.py  # Komplette Test-Suite
+├── requirements.txt    # Dependencies
+├── .env.example        # E-Mail-Konfiguration Template
+├── .gitignore          # .env, state.json, Logs
+├── bot.log             # Laufzeit-Log (Rotation)
+└── state.json          # Versendete Signale (auto-generiert)
+```
+
+## Die 10 Muster
+
+### Zwei-Kerzen-Muster
+| Muster | Signal | Regel |
+|---|---|---|
+| **Bullish Engulfing** | BUY | Kerze 1 rot, Kerze 2 grün, Kerze 2 umschließt Kerze 1 komplett |
+| **Bearish Engulfing** | SELL | Kerze 1 grün, Kerze 2 rot, Kerze 2 umschließt Kerze 1 komplett |
+| **Tweezer Bottom** | BUY | Kerze 1 rot, Kerze 2 grün, identisches Tief (innerhalb 1.5 Pips) |
+| **Tweezer Top** | SELL | Kerze 1 grün, Kerze 2 rot, identisches Hoch (innerhalb 1.5 Pips) |
+
+### Drei-Kerzen-Muster
+| Muster | Signal | Regel |
+|---|---|---|
+| **Morning Star** | BUY | Kerze 1 lang rot, Kerze 2 small body, Kerze 3 lang grün, K3 close > Mitte K1 |
+| **Evening Star** | SELL | Kerze 1 lang grün, Kerze 2 small body, Kerze 3 lang rot, K3 close < Mitte K1 |
+| **Drei Weiße Soldaten** | BUY | 3× grün, steigende Closes, Eröffnungen im Körper der Vorgänger, kleine obere Schatten |
+| **Drei Schwarze Krähen** | SELL | 3× rot, fallende Closes, Eröffnungen im Körper der Vorgänger, kleine untere Schatten |
+
+### Fünf-Kerzen-Muster
+| Muster | Signal | Regel |
+|---|---|---|
+| **Steigendes Dreier-Pattern** | BUY | K1 lang grün, K2–K4 klein (überwiegend rot) innerhalb K1-Spanne, K5 lang grün mit close > K1 close |
+| **Fallendes Dreier-Pattern** | SELL | K1 lang rot, K2–K4 klein (überwiegend grün) innerhalb K1-Spanne, K5 lang rot mit close < K1 close |
+
+## Konfiguration (`config.py`)
+
+Alle Parameter sind an einer Stelle und einfach änderbar:
+
+| Parameter | Startwert | Bedeutung |
+|---|---|---|
+| `SYMBOL` | `EURUSD=X` | yfinance Symbol |
+| `INTERVAL` | `15m` | Kerzenlänge |
+| `LOOKBACK_CANDLES` | `100` | Geholte Kerzen |
+| `TREND_EMA_PERIOD` | `50` | EMA-Periode für Trendfilter |
+| `ATR_PERIOD` | `14` | ATR-Periode |
+| `LONG_BODY_ATR` | `0.8` | "Lange Kerze": Körper ≥ 0.8 × ATR |
+| `SMALL_BODY_ATR` | `0.3` | "Kleiner Körper": Körper ≤ 0.3 × ATR |
+| `TWEEZER_TOLERANCE` | `0.00015` | 1.5 Pips Toleranz |
+| `MIN_SHADOW_RATIO` | `0.25` | Max Schattengröße bei Soldaten (25% der Kerzenspanne) |
+| `SL_BUFFER_ATR` | `0.5` | Puffer hinter Muster-Extrem: 0.5 × ATR |
+| `MIN_SL_PIPS` | `5` | Min. Risiko in Pips; kleinere Signale verworfen |
+| `RISK_REWARD` | `2.0` | Take-Profit = 2 × Risiko → CRV 1:2 |
+| `PIP_SIZE` | `0.0001` | Pip-Größe EUR/USD |
+| `MAX_HOLD_CANDLES` | `32` | Backtest: max Haltedauer (8 Stunden) |
+| `SPREAD_PIPS` | `1.0` | Backtest: angenommener Spread |
+
+## Stop-Loss & Take-Profit
+
+Der Bot **berechnet** SL und TP als Vorschlag (platziert sie nicht):
+
+**BUY-Signal:**
+- Entry = Schlusskurs der letzten Musterkerze
+- SL = tiefstes Low der Musterkerzen − 0.5 × ATR
+- Risk = Entry − SL
+- TP = Entry + 2 × Risk (CRV 1:2)
+
+**SELL-Signal:**
+- Entry = Schlusskurs der letzten Musterkerze
+- SL = höchstes High der Musterkerzen + 0.5 × ATR
+- Risk = SL − Entry
+- TP = Entry − 2 × Risk
+
+Ist Risk < `MIN_SL_PIPS`, wird das Signal **nicht versendet**.
+
+**Beispiel (BUY):**
+- Entry: 1.1000
+- Min Low Muster: 1.0985
+- ATR: 0.0010
+- SL = 1.0985 − 0.0005 = 1.0980
+- Risk = 0.0020 (20 Pips)
+- TP = 1.1000 + 2 × 0.0020 = 1.1040
+
+## Betrieb auf Raspberry Pi
+
+### Cron-Eintrag
+
+Öffne `crontab -e` und füge ein (Mo–Fr, kurz nach jeder Viertelstunde):
+
+```cron
+1,16,31,46 * * * 1-5 cd /home/pi/forex-bot && /home/pi/forex-bot/.venv/bin/python main.py >> bot.log 2>&1
+```
+
+Das läuft um **01, 16, 31, 46 Minuten** jeder Stunde, Mo–Fr.
+
+### Logrotation
+
+Damit `bot.log` nicht endlos wächst, erstelle `/etc/logrotate.d/forex-bot`:
+
+```
+/home/pi/forex-bot/bot.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
+```
+
+### Prüfung
+
+```bash
+# Test live
+python main.py
+
+# Log ansehen
+tail -f bot.log
+
+# Cron-Test: eine Stunde voraus, dann warten
+```
+
+## Signal-E-Mail
+
+Bei Mustererkennung erhält der Empfänger eine E-Mail wie:
+
+```
+Subject: BUY EUR/USD – Bullish Engulfing (15m)
+
+BUY-Signal erkannt
+
+Muster: Bullish Engulfing
+Kerzenzeit (UTC): 2024-01-15 10:00:00+00:00
+
+--- Einstieg und Risiko ---
+Einstieg: 1.10000
+Stop-Loss: 1.09800
+Take-Profit: 1.10400
+Risiko: 20.00 Pips
+CRV: 1:2
+
+HINWEIS: Dies ist kein Anlagerat, sondern nur eine automatische Mustererkennung.
+Forex-Handel mit Hebel ist hochriskant.
+```
+
+## Backtest-Output
+
+```
+Muster                    Signale     TP    SL  Timeout  Avg Pips        R
+---
+Bullish Engulfing              23  52% 39%    9%     12.5    0.84
+Bearish Engulfing              19  47% 42%   11%      8.3    0.61
+...
+GESAMT                        215                       10.1
+```
+
+- **Signale:** Anzahl gefundener Muster in der Historie
+- **TP/SL/Timeout:** Wie oft TP erreicht, SL erreicht, oder Zeitlimit überschritten
+- **Avg Pips:** Durchschnittliches Ergebnis in Pips
+- **R:** Ergebnis in Risikoeinheiten (TP = +2, SL = −1, Timeout = proportional)
+
+## Tests
+
+```bash
+pytest tests/ -v
+```
+
+Dekkt ab:
+- ✅ Alle 10 Muster (jeweils 1 Pass + 1 Fail-Variante)
+- ✅ SL/TP-Berechnung für BUY und SELL
+- ✅ Zu kleine Signale werden verworfen
+- ✅ Trend-Filter (Aufwärts- & Abwärtstrend)
+- ✅ Duplikat-Schutz
+
+## Wichtige Hinweise
+
+1. **Kein Anlagerat!** Dieser Bot ist nur Mustererkennung. Forex mit Hebel ist hochriskant.
+2. **Paper-Trading empfohlen** – teste zuerst mit echtem Backtest & Demokonto.
+3. **Abhängigkeiten:** yfinance ist kostenlos, aber nicht 100% zuverlässig. Netzwerkfehler werden geloggt.
+4. **Gmail App-Passwort** – unbedingt genau befolgen, sonst Fehler beim E-Mail-Versand.
+5. **Zeitzone:** Der Bot arbeitet intern mit UTC. Lokale Zeit für E-Mail aus `.env`.
+6. **Raspberry Pi:** CPU-Last minimal, braucht Internetverbindung.
+
+## Lizenz
+
+MIT (oder nach Belieben)
+
+## Credits
+
+Inspiriert durch klassische Forex-Technische-Analyse. Implementierung mit pandas/numpy (kein TA-Lib nötig).
