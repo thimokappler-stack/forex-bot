@@ -112,11 +112,18 @@ def test_pipeline_durchlaeuft_alle_stufen_mit_log_only(registry, paths):
 
     assert summary["signals"] == 1
     assert summary["new"] == 1
-    assert fetch.calls == [("EURUSD=X", "15m", 100)]
+    assert fetch.calls == [("EURUSD=X", "15m", 403)]  # SR_LOOKBACK_CANDLES + SWING_N
     rows = pd.read_csv(paths["csv_path"], sep=";", encoding="utf-8-sig")
     assert len(rows) == 1
     assert rows.iloc[0]["sl"] == pytest.approx(1.1000 + 39 * 0.00001 - 0.0025 - 0.0005)
     assert __import__("os").path.exists(paths["state_path"])
+
+
+def test_sr_aus_holt_nur_lookback_kerzen(registry, paths):
+    cfg = make_config(SR_ENABLED=False)
+    fetch = fake_fetch(make_candles())
+    run_one(now=NOW, config=cfg, fetch=fetch, **paths)
+    assert fetch.calls == [("EURUSD=X", "15m", cfg.LOOKBACK_CANDLES)]
 
 
 def test_modus_off_erzeugt_nichts(registry, paths, smtp):

@@ -133,7 +133,7 @@ def test_fetch_bekommt_intervall_30m(fire_at, tmp_path):
     fetch = fake_fetch(candles("30min", 20))
     pipeline.run_market(market_config("EURUSD_30M"), NOW, False, fetch,
                         str(tmp_path / "s.json"), str(tmp_path / "c.csv"))
-    assert fetch.calls == [("EURUSD=X", "30m", 100)]
+    assert fetch.calls == [("EURUSD=X", "30m", 403)]  # SR_LOOKBACK_CANDLES + SWING_N
 
 
 def test_30m_markt_stale_schwelle_90_minuten(fire_at, tmp_path, caplog):

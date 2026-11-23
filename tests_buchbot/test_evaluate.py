@@ -7,6 +7,7 @@ from buchbot import backtest
 from buchbot import config as default_config
 from buchbot import evaluate
 from buchbot.models import Signal
+from buchbot.zones import SR_COLUMNS
 
 
 SIGNAL_FIELDS = ["time", "symbol", "interval", "source", "pattern", "direction",
@@ -48,6 +49,17 @@ def write_csv(path, rows, fields=SIGNAL_FIELDS):
         writer = csv.DictWriter(handle, fieldnames=fields, delimiter=";", extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def test_read_signal_rows_liest_alte_und_neue_kopfzeile(tmp_path):
+    old = tmp_path / "alt.csv"
+    new = tmp_path / "neu.csv"
+    write_csv(old, [signal_row()])
+    write_csv(new, [signal_row(sr_relation="at_support")], fields=SIGNAL_FIELDS + SR_COLUMNS)
+    for path in (old, new):
+        rows = evaluate.read_signal_rows(str(path))
+        assert len(rows) == 1
+        assert rows[0]["entry"] == "1.10000"
 
 
 def evaluate_one(df, config, **overrides):

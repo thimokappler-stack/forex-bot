@@ -43,6 +43,42 @@ def _ratio(value):
     return "–" if value is None else f"1:{value:g}"
 
 
+TREND_TEXT = {"up": "aufwärts", "down": "abwärts", "range": "seitwärts"}
+
+
+def _sr_lines(signal, config):
+    """Zusatzinfo zu Zonen. Leer, wenn SR_IN_MAIL aus ist oder das Signal keine Zone hat."""
+    if not config.SR_IN_MAIL:
+        return []
+    tags = signal.tags
+    relation = tags.get("sr_relation")
+    against = tags.get("sr_against") is True
+    if relation in (None, "none") and not against:
+        return []
+    decimals = config.PRICE_DECIMALS
+    lines = []
+    if relation in ("at_support", "at_resistance"):
+        kind = "Unterstützung" if relation == "at_support" else "Widerstand"
+        band = f"{_price(tags['sr_zone_low'], decimals)}–{_price(tags['sr_zone_high'], decimals)}"
+        touches = tags["sr_touches"]
+        if signal.direction == "NEUTRAL":
+            position = "Einstieg liegt nahe der Zone"
+        else:
+            position = "Muster liegt an der Zone"
+        lines.append(f"Zone: {kind} {band} ({touches} Berührungen), {position}")
+    if against:
+        if signal.direction == "BUY":
+            kind, side = "Widerstand", "über"
+        else:
+            kind, side = "Unterstützung", "unter"
+        level = _price(tags["sr_against_level"], decimals)
+        lines.append(f"Achtung: {kind} {level} nur {tags['sr_against_atr']:.1f} ATR {side} dem Einstieg")
+    trend_text = TREND_TEXT.get(tags.get("swing_trend"))
+    if trend_text:
+        lines.append(f"Swing-Trend: {trend_text}")
+    return lines
+
+
 def build_body(signals, config):
     tz = ZoneInfo(config.DISPLAY_TZ)
     blocks = []
@@ -59,6 +95,7 @@ def build_body(signals, config):
             f"Risiko: {_pips(signal.risk_pips, config.RISK_UNIT)}",
             f"CRV: {_ratio(signal.rr)}",
         ]
+        lines.extend(_sr_lines(signal, config))
         if signal.tags.get("prior_candle"):
             lines.append("Hinweis: Signal der vorherigen Kerze.")
         blocks.append("\n".join(lines))

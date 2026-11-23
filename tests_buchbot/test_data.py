@@ -230,6 +230,22 @@ class TestGetCandles:
         assert str(df.index.tz) == "UTC"
         assert df.index[-1] == index[-1].tz_convert("UTC")
 
+    def test_get_candles_waehlt_sr_zeitraum_fuer_grosses_lookback(self, monkeypatch):
+        import buchbot.config as cfg
+        import buchbot.data as data
+
+        index = pd.date_range("2026-11-20 10:00", periods=3, freq="15min", tz="UTC")
+        calls = {}
+
+        def fake(symbol, **kwargs):
+            calls.update(kwargs)
+            return self._fake_download(index)
+
+        monkeypatch.setattr(data.yf, "download", fake)
+        data.get_candles(lookback=cfg.SR_LOOKBACK_CANDLES + cfg.SWING_N)
+
+        assert calls["period"] == cfg.SR_FETCH_PERIOD
+
     def test_get_candles_naive_index_is_treated_as_utc(self, monkeypatch):
         import buchbot.data as data
 

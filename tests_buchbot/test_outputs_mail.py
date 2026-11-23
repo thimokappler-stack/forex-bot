@@ -146,3 +146,41 @@ def test_fehlgeschlagener_versand_wird_geloggt_und_nicht_als_gesendet_gemeldet(s
     sent = mail.send_notifications([make_signal()], make_config())
     assert sent == []
     assert "Mail-Versand fehlgeschlagen" in caplog.text
+
+
+def make_zone_signal(direction="BUY", **tags):
+    signal = make_signal(direction=direction)
+    signal.tags = {"sr_relation": "at_support", "sr_zone_low": 1.09420, "sr_zone_high": 1.09450,
+                   "sr_touches": 4, "sr_aligned": True, "sr_against": False,
+                   "sr_room_atr": None, "swing_trend": "up"}
+    signal.tags.update(tags)
+    return signal
+
+
+def test_mail_mit_zone_zeigt_zone_und_swing_trend():
+    body = mail.build_body([make_zone_signal()], make_config())
+    assert "Zone: Unterstützung 1.09420–1.09450 (4 Berührungen), Muster liegt an der Zone" in body
+    assert "Swing-Trend: aufwärts" in body
+
+
+def test_mail_achtung_bei_widerstand_nahe_dem_einstieg():
+    signal = make_zone_signal(sr_relation="none", sr_aligned=None, sr_zone_low=None,
+                              sr_zone_high=None, sr_touches=None, sr_against=True,
+                              sr_against_level=1.10900, sr_against_atr=0.4)
+    body = mail.build_body([signal], make_config())
+    assert "Achtung: Widerstand 1.10900 nur 0.4 ATR über dem Einstieg" in body
+
+
+def test_mail_ohne_zone_bleibt_unveraendert():
+    signal = make_signal()
+    signal.tags = {"sr_relation": "none", "sr_against": False}
+    body = mail.build_body([signal], make_config())
+    assert "Zone:" not in body
+    assert "Swing-Trend" not in body
+    assert "Achtung" not in body
+
+
+def test_mail_sr_in_mail_aus_zeigt_keine_zone():
+    body = mail.build_body([make_zone_signal()], make_config(SR_IN_MAIL=False))
+    assert "Zone:" not in body
+    assert "Swing-Trend" not in body

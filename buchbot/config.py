@@ -112,6 +112,17 @@ TREND_EMA_PERIOD = 50         # EMA-Periode für Trend-Filter
 # === VOLATILITÄT (ATR) ===
 ATR_PERIOD = 14               # ATR-Periode für Größenvergleiche
 
+# === UNTERSTÜTZUNG UND WIDERSTAND (Kapitel 9, nur Zusatzinfo, filtert nichts) ===
+SR_ENABLED = True             # False: Bot verhält sich exakt wie ohne Zonen
+SWING_N = 3                   # Pivot gilt als bestätigt, wenn n Kerzen danach vorliegen
+SR_LOOKBACK_CANDLES = 400     # Kerzen, aus denen Zonen gebildet werden
+SR_ZONE_WIDTH_ATR = 0.5       # Pivots mit Abstand > 0.5 × ATR zum Clusteranfang bilden neuen Cluster
+SR_MIN_ZONE_WIDTH_ATR = 0.25  # Mindestbreite einer Zone (um die Mitte zentriert)
+SR_MIN_TOUCHES = 3            # Ab so vielen Pivots gilt eine Zone als stark
+SR_PROXIMITY_ATR = 0.5        # Nähe zur Zone in ATR (beidseitig erweitert, auch für sr_against)
+SR_IN_MAIL = True             # Zonen-Zeilen in die Mail
+SR_FETCH_PERIOD = "14d"       # yfinance-Periode, damit SR_LOOKBACK_CANDLES + SWING_N Kerzen reichen
+
 # === KERZENGRÖSSEN (relativ zu ATR) ===
 LONG_BODY_ATR = 0.8           # "Lange Kerze": Körper ≥ 0.8 × ATR
 SMALL_BODY_ATR = 0.3          # "Kleiner Körper": Körper ≤ 0.3 × ATR

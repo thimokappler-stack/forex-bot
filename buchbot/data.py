@@ -11,13 +11,22 @@ Funktionen:
 import logging
 import pandas as pd
 import yfinance as yf
-from buchbot.config import MARKETS, DEFAULT_MARKET, INTERVAL, LOOKBACK_CANDLES, ATR_PERIOD, TREND_EMA_PERIOD
+from buchbot.config import (
+    MARKETS, DEFAULT_MARKET, INTERVAL, LOOKBACK_CANDLES, ATR_PERIOD, TREND_EMA_PERIOD, SR_FETCH_PERIOD,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-def get_candles(symbol=None, interval=INTERVAL, lookback=LOOKBACK_CANDLES, period="5d"):
+def _period_for(lookback):
+    """Ab mehr Kerzen als LOOKBACK_CANDLES reicht "5d" nicht mehr (z. B. 30m-Kerzen), dann SR_FETCH_PERIOD."""
+    if lookback is not None and lookback > LOOKBACK_CANDLES:
+        return SR_FETCH_PERIOD
+    return "5d"
+
+
+def get_candles(symbol=None, interval=INTERVAL, lookback=LOOKBACK_CANDLES, period=None):
     """
     Holt Kerzen von yfinance. `interval` ist die Kerzenlänge je Markt (z.B. "15m", "30m"),
     `lookback` die Anzahl der letzten Kerzen (None = alle).
@@ -26,6 +35,7 @@ def get_candles(symbol=None, interval=INTERVAL, lookback=LOOKBACK_CANDLES, perio
         symbol: yfinance Symbol (z.B. "EURUSD=X"). None = Symbol des Standardmarktes.
         interval: Kerzenlänge (z.B. "15m", "30m")
         lookback: Anzahl Kerzen zum Abholen
+        period: yfinance-Periode. None = aus lookback gewählt (_period_for)
     
     Returns:
         pd.DataFrame mit Columns: open, high, low, close (Index: timestamp UTC)
@@ -41,7 +51,7 @@ def get_candles(symbol=None, interval=INTERVAL, lookback=LOOKBACK_CANDLES, perio
         df = yf.download(
             symbol,
             interval=interval,
-            period=period,
+            period=period or _period_for(lookback),
             progress=False,
             prepost=False,  # Kein Pre/Post-Market für Forex
         )

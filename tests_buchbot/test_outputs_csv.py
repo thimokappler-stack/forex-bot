@@ -147,3 +147,37 @@ def test_passende_kopfzeile_wird_nicht_umbenannt(tmp_path):
 
     assert list(tmp_path.glob("signals_log_alt_*.csv")) == []
     assert len(read_rows(path)) == 3
+
+
+def test_sr_werte_stehen_in_den_neuen_spalten(tmp_path):
+    path = str(tmp_path / "signals_log.csv")
+    signal = make_signal()
+    signal.tags.update({"sr_relation": "at_support", "sr_zone_low": 1.09900,
+                        "sr_zone_high": 1.10050, "sr_touches": 3, "sr_aligned": True,
+                        "sr_against": False, "sr_room_atr": 1.25, "swing_trend": "up"})
+    log_csv.append_signals([signal], make_df(), "15m", path)
+    record = dict(zip(*read_rows(path)[:2]))
+    assert record["sr_relation"] == "at_support"
+    assert record["sr_zone_low"] == "1.09900"
+    assert record["sr_zone_high"] == "1.10050"
+    assert record["sr_touches"] == "3"
+    assert record["sr_aligned"] == "True"
+    assert record["sr_room_atr"] == "1.25"
+    assert record["swing_trend"] == "up"
+
+
+def test_alte_kopfzeile_als_praefix_wird_in_place_erweitert(tmp_path):
+    path = tmp_path / "signals_log.csv"
+    old_columns = log_csv.COLUMNS[:-len(log_csv.SR_COLUMNS)]
+    old_row = ["x" + str(i) for i in range(len(old_columns))]
+    path.write_text(";".join(old_columns) + "\n" + ";".join(old_row) + "\n", encoding="utf-8-sig")
+
+    log_csv.append_signals([make_signal()], make_df(), "15m", str(path))
+
+    assert list(tmp_path.glob("signals_log_alt_*.csv")) == []
+    assert not list(tmp_path.glob("*.tmp"))
+    rows = read_rows(path)
+    assert rows[0] == log_csv.COLUMNS
+    assert rows[1][:len(old_columns)] == old_row
+    assert rows[1][len(old_columns):len(log_csv.COLUMNS)] == [""] * len(log_csv.SR_COLUMNS)
+    assert len(rows) == 3

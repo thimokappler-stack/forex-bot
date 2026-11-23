@@ -18,6 +18,7 @@ import pandas as pd
 from buchbot import config as default_config
 from buchbot import sltp
 from buchbot import state as state_store
+from buchbot import zones
 from buchbot.config import LOG_ONLY_DETECTORS, MARKETS, read_settings
 from buchbot.data import get_candles, remove_incomplete_candle
 from buchbot.detectors import run_detectors
@@ -64,13 +65,25 @@ def _gold_open(now_utc):
     return not (17 * 60 <= minute < 18 * 60)  # Montag bis Donnerstag: tägliche Pause 17:00-18:00
 
 
+def sr_candles_needed(config):
+    """Kerzen, die die Zonen-Berechnung braucht (Zonen nutzen SR_LOOKBACK_CANDLES plus SWING_N Bestätigungskerzen)."""
+    return config.SR_LOOKBACK_CANDLES + config.SWING_N
+
+
+def fetch_lookback(config):
+    """Mit SR_ENABLED mehr Kerzen holen, die Detektoren nutzen aber weiter die letzten LOOKBACK_CANDLES."""
+    if config.SR_ENABLED:
+        return max(config.LOOKBACK_CANDLES, sr_candles_needed(config))
+    return config.LOOKBACK_CANDLES
+
+
 def fetch_candles(fetch, config):
     """Holt Kerzen. Bei leerer Antwort oder Fehler genau ein Wiederholungsversuch nach FETCH_RETRY_SECONDS."""
     for attempt in range(2):
         if attempt:
             time.sleep(config.FETCH_RETRY_SECONDS)
         try:
-            df = fetch(config.SYMBOL, config.INTERVAL, config.LOOKBACK_CANDLES)
+            df = fetch(config.SYMBOL, config.INTERVAL, fetch_lookback(config))
         except Exception as exc:
             if attempt == 1:
                 raise
@@ -117,6 +130,9 @@ def run_market(config, now, dry_run, fetch=get_candles, state_path=None, csv_pat
     if df is None or len(df) == 0:
         logger.error("Keine Kerzen erhalten. Lauf beendet, nächster Lauf versucht es erneut.")
         return summary
+    if config.SR_ENABLED and len(df) < sr_candles_needed(config):
+        logger.warning("[%s] Zu wenige Kerzen für Zonen: %d vorhanden, %d gewünscht. Vorhandene werden verwendet.",
+                       config.MARKET, len(df), sr_candles_needed(config))
 
     if not dry_run and pd.Timestamp(df.index[-1]) > now + pd.Timedelta(minutes=config.CLOCK_TOLERANCE_MINUTES):
         logger.warning(
@@ -141,9 +157,12 @@ def run_market(config, now, dry_run, fetch=get_candles, state_path=None, csv_pat
         )
         return summary
 
+    candles = df
+    df = candles.tail(config.LOOKBACK_CANDLES)
     signals = detect_window(df, config)
     signals = trend.apply(signals, df, config)
     signals = sltp.apply(signals, config)
+    signals = zones.annotate(signals, candles, config)
     summary["signals"] = len(signals)
 
     state = state_store.load_state(state_path)
@@ -170,7 +189,7 @@ def run_market(config, now, dry_run, fetch=get_candles, state_path=None, csv_pat
         return summary
 
     if to_log:
-        log_csv.append_signals(to_log, df, config.INTERVAL, csv_path, config)
+        log_csv.append_signals(to_log, candles, config.INTERVAL, csv_path, config)
         for signal in to_log:
             state_store.mark_logged(state, state_store.signal_key(signal), now)
 

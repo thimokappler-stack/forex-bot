@@ -315,6 +315,36 @@ HINWEIS: Dies ist kein Anlagerat, sondern nur eine automatische Mustererkennung.
 Forex-Handel mit Hebel ist hochriskant.
 ```
 
+## Unterstützung und Widerstand (Kapitel 9)
+
+Zusatzinfos zu jedem Signal aus dem Buchkapitel "Unterstützung und Widerstand". **Es filtert nichts:** Auslöser, Signale und Mail-Empfänger bleiben unverändert.
+
+Regeln:
+- **Swing-Punkte** (`buchbot/swings.py`): Ein Hoch ist ein Swing-Hoch, wenn sein High größer ist als die `SWING_N` Highs davor und mindestens so groß wie die `SWING_N` Highs danach (Tiefs spiegelverkehrt). Ein Pivot gilt erst als bestätigt, wenn `SWING_N` Kerzen danach vorliegen. Für eine Kerze werden nur Pivots mit Index `<= t - SWING_N` genutzt, also keine Zukunftsdaten.
+- **Zonen** (`buchbot/zones.py`): Alle Pivot-Preise der letzten `SR_LOOKBACK_CANDLES` Kerzen werden sortiert und gierig geclustert. Ein neuer Cluster beginnt, wenn ein Preis mehr als `SR_ZONE_WIDTH_ATR` × ATR über dem tiefsten Preis des Clusters liegt. Die Zone reicht vom tiefsten bis zum höchsten Preis, mindestens 0,25 × ATR breit. `touches` ist die Anzahl der Pivots. Stark ist eine Zone mit `touches >= SR_MIN_TOUCHES`. Liegt ihre Mitte unter dem Einstieg, ist sie Unterstützung, sonst Widerstand.
+- **Annotation**: Jedes Signal (auch NEUTRAL) bekommt in `tags` die Felder `sr_relation`, `sr_zone_low`, `sr_zone_high`, `sr_touches`, `sr_aligned`, `sr_against`, `sr_room_atr` und `swing_trend`. Gerechnet wird nur mit Kerzen bis zur Signalkerze.
+  - BUY passt an starker Unterstützung, SELL an starkem Widerstand. Dabei zählt das Muster innerhalb der Zone, erweitert um `SR_PROXIMITY_ATR` × ATR.
+  - `sr_against`: BUY mit starkem Widerstand knapp über dem Einstieg, SELL mit starker Unterstützung knapp unter dem Einstieg.
+  - `swing_trend`: `up` / `down` bei zwei höheren bzw. tieferen Swing-Hochs und -Tiefs, sonst `range`. Der EMA-Trendfilter bleibt unverändert.
+- **CSV**: Die acht SR-Spalten stehen am Ende der Kopfzeile. Eine alte Kopfzeile wird in place erweitert, Zeilen bleiben erhalten. Eine fremde Kopfzeile wird weiterhin umbenannt.
+- **Mail**: Bei einer Zone stehen unter den Zahlen Zeilen wie `Zone: Unterstützung 1.09420–1.09450 (4 Berührungen), Muster liegt an der Zone`, `Achtung: Widerstand ... nur 0.4 ATR über dem Einstieg` und `Swing-Trend: aufwärts`.
+
+Parameter in `buchbot/config.py` (marktunabhängig, ATR-relativ):
+
+| Parameter | Wert | Bedeutung |
+|---|---|---|
+| `SR_ENABLED` | `True` | `False`: Verhalten wie vor Schritt 12a |
+| `SWING_N` | `3` | Kerzen links/rechts für einen Pivot |
+| `SR_LOOKBACK_CANDLES` | `400` | Kerzen für Pivots und Zonen |
+| `SR_ZONE_WIDTH_ATR` | `0.5` | Clustergrenze in ATR |
+| `SR_MIN_ZONE_WIDTH_ATR` | `0.25` | Mindestbreite einer Zone in ATR |
+| `SR_MIN_TOUCHES` | `3` | Berührungen für eine starke Zone |
+| `SR_PROXIMITY_ATR` | `0.5` | Nähe in ATR für Zonenbezug und `sr_against` |
+| `SR_IN_MAIL` | `True` | Zeilen zur Zone in die Mail |
+| `SR_FETCH_PERIOD` | `"14d"` | yfinance-Zeitraum, wenn mehr Kerzen nötig sind |
+
+Die Pipeline holt für Zonen mindestens `SR_LOOKBACK_CANDLES + SWING_N` Kerzen. Fehlen Kerzen, wird eine Zeile ins Log geschrieben. Detektoren, Trendfilter, ATR und SL/TP arbeiten weiter mit den letzten `LOOKBACK_CANDLES`.
+
 ## Backtest-Output
 
 ```

@@ -23,7 +23,9 @@ from buchbot.detectors.candles_main import PATTERNS as MAIN_PATTERNS
 from buchbot.detectors.candles_single import PATTERNS as SINGLE_PATTERNS
 from buchbot.filters import trend
 from buchbot.models import format_price
+from buchbot.outputs.log_csv import sr_fields
 from buchbot.pipeline import BASE_DIR
+from buchbot.zones import SR_COLUMNS, annotate
 
 
 OUTCOME_TP = "TP"
@@ -41,7 +43,7 @@ TRADE_STAGES = ("simuliert", "offen", "uebersprungen")
 CSV_FIELDS = [
     "market", "pattern", "direction", "signal_time_utc", "entry", "sl", "tp", "risk_pips", "rr",
     "exit_time_utc", "exit_price", "outcome", "r",
-]
+] + SR_COLUMNS
 
 
 def first_position(config):
@@ -62,6 +64,8 @@ def find_signals(df, config):
         raw = run_detectors(view, config)
         after_trend = trend.apply(raw, view, config)
         after_sltp = sltp.apply(after_trend, config)
+        # view endet bei pos, die SR-Zonen sehen also keine späteren Kerzen
+        after_sltp = annotate(after_sltp, view, config)
         for stage, signals in (("raw", raw), ("trend", after_trend), ("sltp", after_sltp)):
             funnel[stage].update(s.pattern for s in signals)
         found.extend((pos, signal) for signal in after_sltp)
@@ -83,6 +87,7 @@ def _trade(signal, df, pos, exit_pos, exit_price, outcome, config):
         "exit_price": exit_price,
         "outcome": outcome,
         "r": None,
+        "tags": signal.tags,
         "exit_pos": exit_pos,
     }
     if exit_pos is not None and outcome != OUTCOME_OPEN:
@@ -252,7 +257,7 @@ def write_csv(trades, path):
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS, delimiter=";")
         writer.writeheader()
         for t in trades:
-            writer.writerow({
+            row = {
                 "market": t.get("market"),
                 "pattern": t["pattern"],
                 "direction": t["direction"],
@@ -266,7 +271,9 @@ def write_csv(trades, path):
                 "exit_price": format_price(t["exit_price"], t["decimals"]),
                 "outcome": t["outcome"],
                 "r": _fmt(t["r"], 2),
-            })
+            }
+            row.update(sr_fields(t["tags"], t["decimals"]))
+            writer.writerow(row)
 
 
 def _print_report(df, cfg, trades, funnel):
