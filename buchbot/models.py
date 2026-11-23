@@ -5,6 +5,24 @@ Signal-Datenstruktur. Alle Module tauschen nur diese Struktur aus.
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import pandas as pd
+
+
+def to_utc(value):
+    """Zeitstempel als UTC-Timestamp. Naive Werte gelten als UTC."""
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
+
+
+PRICE_DECIMALS = 5
+
+
+def format_price(value):
+    """Preis für Log, CSV und Mail mit 5 Nachkommastellen. None bleibt None."""
+    return None if value is None else f"{float(value):.{PRICE_DECIMALS}f}"
+
 
 @dataclass
 class Signal:

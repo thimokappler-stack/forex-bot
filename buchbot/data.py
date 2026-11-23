@@ -54,6 +54,8 @@ def get_candles(symbol=SYMBOL, interval=INTERVAL, lookback=LOOKBACK_CANDLES):
 
         df = df[["Open", "High", "Low", "Close"]].copy()
         df.columns = ["open", "high", "low", "close"]
+        # yfinance liefert float32-Rauschen, Preise auf 6 Nachkommastellen runden
+        df = df.astype(float).round(6)
 
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")

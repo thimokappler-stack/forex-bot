@@ -60,6 +60,25 @@ DETECTORS = {
     "candles_single": "off",
 }
 
+# === PIPELINE & MARKTZEITEN ===
+# Marktzeiten als (Wochentag, Stunde UTC); Montag = 0, Sonntag = 6
+MARKET_CLOSED_FROM = (4, 22)  # Freitag 22:00 UTC: Markt geschlossen
+MARKET_CLOSED_UNTIL = (6, 22) # Sonntag 22:00 UTC: Markt wieder offen
+STALE_MAX_MINUTES = 45        # Letzte geschlossene Kerze älter als das = "Daten veraltet"
+EVAL_WINDOW_CANDLES = 2       # Pro Lauf ausgewertete geschlossene Kerzen (1 = nur die letzte)
+STATE_FILE = "state_new.json" # Duplikat-Schutz, relativ zum Projektordner
+STATE_RETENTION_DAYS = 7      # Einträge im Duplikat-Schutz werden nach so vielen Tagen entfernt
+SIGNALS_CSV_FILE = "signals_log.csv"  # Signal-Protokoll, relativ zum Projektordner
+
+# === E-MAIL ===
+NOTIFY_ENABLED = False        # Schalter: solange False, wird keine Mail gesendet
+DISPLAY_SYMBOL = "EUR/USD"    # Anzeigename im Betreff und Text
+DISPLAY_TZ = "Europe/Berlin"  # Lokale Zeit in der Mail
+MAIL_SMTP_HOST = "smtp.gmail.com"
+MAIL_SMTP_PORT = 465          # SMTP über SSL
+MAIL_TIMEOUT_SECONDS = 30
+MAIL_DISCLAIMER = "Kein Anlagerat, nur Mustererkennung."
+
 # === BACKTEST ===
 MAX_HOLD_CANDLES = 32         # Max Haltedauer: 32 Kerzen = 8 Stunden
 SPREAD_PIPS = 1.0             # Angenommener Spread in Pips
