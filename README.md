@@ -210,7 +210,7 @@ Für Krypto ist die Risikoeinheit USD statt Pips, und die Preise werden auf 2 Na
 
 ### Beobachtungsmärkte
 
-Diese Märkte werden ausgewertet, geloggt und in `signals_log.csv` geschrieben. Sie senden standardmäßig **keine** Mail, auch nicht bei `BUCH_NOTIFY_ENABLED=1` und auch nicht, wenn sie in `BUCH_NOTIFY_MARKETS` stehen. Welche Märkte Beobachtungsmärkte sind, steuert `BUCH_OBSERVE_ONLY_MARKETS` in der `.env`. Der Standard sind alle Märkte der Tabelle außer `EURUSD_30M`. `EURUSD_30M` ist fest und sendet nie eine Mail.
+Diese Märkte werden ausgewertet, geloggt und in `signals_log.csv` geschrieben. Sie senden standardmäßig **keine** Mail, auch nicht bei `BUCH_NOTIFY_ENABLED=1` und auch nicht, wenn sie in `BUCH_NOTIFY_MARKETS` stehen. Welche Märkte Beobachtungsmärkte sind, steuert `BUCH_OBSERVE_ONLY_MARKETS` in der `.env`. Der Standard ist die Liste `USDJPY, AUDUSD, GBPJPY, USDCAD, USDCHF, EURJPY, GOLD`. `EURUSD_30M` ist zusätzlich fest stummgeschaltet und sendet nie eine Mail, unabhängig von der Liste.
 
 | Markt-Schlüssel | Anzeige | yfinance-Symbol | Intervall | Handelszeiten |
 |---|---|---|---|---|
