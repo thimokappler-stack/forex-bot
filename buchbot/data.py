@@ -11,7 +11,7 @@ Funktionen:
 import logging
 import pandas as pd
 import yfinance as yf
-from config_new import SYMBOL, INTERVAL, LOOKBACK_CANDLES, ATR_PERIOD, TREND_EMA_PERIOD
+from buchbot.config import SYMBOL, INTERVAL, LOOKBACK_CANDLES, ATR_PERIOD, TREND_EMA_PERIOD
 
 
 logger = logging.getLogger(__name__)

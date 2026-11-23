@@ -1,5 +1,5 @@
 """
-Tests für patterns_new.py (zehn Haupt-Muster).
+Tests für buchbot/detectors/candles_main.py (zehn Haupt-Muster).
 
 Jedes Muster hat einen positiven Fall und negative Fälle.
 Bärische Muster werden über Spiegelung (mirror) der bullischen Fälle geprüft:
@@ -9,8 +9,8 @@ Preise werden an 2 gespiegelt, Farben und Hoch/Tief tauschen dabei.
 import pandas as pd
 import pytest
 
-import patterns_new as pn
-from patterns_new import Candle
+import buchbot.detectors.candles_main as pn
+from buchbot.detectors.candles_main import Candle
 
 ATR = 0.0010
 

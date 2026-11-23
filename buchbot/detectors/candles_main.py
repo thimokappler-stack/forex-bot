@@ -11,7 +11,7 @@ in zeitlicher Reihenfolge, die letzte Kerze ist die des Musters.
 import math
 from collections import namedtuple
 
-import config_new as cfg
+import buchbot.config as cfg
 
 
 Candle = namedtuple("Candle", ["open", "high", "low", "close"])

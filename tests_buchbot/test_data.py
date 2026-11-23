@@ -9,7 +9,7 @@ Fokus Schritt 1:
 import pytest
 import pandas as pd
 from datetime import datetime
-from data_new import remove_incomplete_candle, calculate_atr, calculate_ema
+from buchbot.data import remove_incomplete_candle, calculate_atr, calculate_ema
 
 
 class TestRemoveIncompleteCandle:
@@ -211,7 +211,7 @@ class TestGetCandles:
         return pd.DataFrame(data, index=index, columns=cols)
 
     def test_get_candles_flattens_columns_and_converts_to_utc(self, monkeypatch):
-        import data_new
+        import buchbot.data as data_new
 
         index = pd.date_range("2026-11-20 10:00", periods=5, freq="15min", tz="Europe/Berlin")
         calls = {}
@@ -231,7 +231,7 @@ class TestGetCandles:
         assert df.index[-1] == index[-1].tz_convert("UTC")
 
     def test_get_candles_naive_index_is_treated_as_utc(self, monkeypatch):
-        import data_new
+        import buchbot.data as data_new
 
         index = pd.date_range("2026-11-20 10:00", periods=3, freq="15min")
         monkeypatch.setattr(data_new.yf, "download", lambda symbol, **kw: self._fake_download(index))
