@@ -14,7 +14,20 @@ def fake_download_factory(values):
     return fake_download
 
 
-def test_get_candles_rundet_ohlc_auf_sechs_nachkommastellen(monkeypatch):
+def test_get_candles_passes_period_to_yf_download(monkeypatch):
+    calls = []
+
+    def recording_download(*args, **kwargs):
+        calls.append(kwargs)
+        return fake_download_factory([1.1, 1.1001])(*args, **kwargs)
+
+    monkeypatch.setattr(data.yf, "download", recording_download)
+
+    df = data.get_candles("EURUSD=X", "15m", lookback=None, period="60d")
+
+    assert calls[0]["period"] == "60d"
+    assert len(df) == 2
+
     noisy = [1.0984183549880981, 1.1000049999999]
     monkeypatch.setattr(data.yf, "download", fake_download_factory(noisy))
 

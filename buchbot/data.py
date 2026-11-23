@@ -17,7 +17,7 @@ from buchbot.config import SYMBOL, INTERVAL, LOOKBACK_CANDLES, ATR_PERIOD, TREND
 logger = logging.getLogger(__name__)
 
 
-def get_candles(symbol=SYMBOL, interval=INTERVAL, lookback=LOOKBACK_CANDLES):
+def get_candles(symbol=SYMBOL, interval=INTERVAL, lookback=LOOKBACK_CANDLES, period="5d"):
     """
     Holt die letzten `lookback` geschlossenen 15m-Kerzen von yfinance.
     
@@ -39,7 +39,7 @@ def get_candles(symbol=SYMBOL, interval=INTERVAL, lookback=LOOKBACK_CANDLES):
         df = yf.download(
             symbol,
             interval=interval,
-            period="5d",
+            period=period,
             progress=False,
             prepost=False,  # Kein Pre/Post-Market für Forex
         )
@@ -63,7 +63,8 @@ def get_candles(symbol=SYMBOL, interval=INTERVAL, lookback=LOOKBACK_CANDLES):
             df.index = df.index.tz_convert("UTC")
         
         # Letzten N Kerzen
-        df = df.tail(lookback)
+        if lookback is not None:
+            df = df.tail(lookback)
         
         logger.info(f"Erhalten {len(df)} Kerzen. Erste: {df.index[0]}, Letzte: {df.index[-1]}")
         return df

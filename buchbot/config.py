@@ -83,3 +83,5 @@ MAIL_DISCLAIMER = "Kein Anlagerat, nur Mustererkennung."
 MAX_HOLD_CANDLES = 32         # Max Haltedauer: 32 Kerzen = 8 Stunden
 SPREAD_PIPS = 1.0             # Angenommener Spread in Pips
 MIN_SIGNALS_FOR_STATS = 30    # Minimum Signale für belastbare Backtest-Aussage
+BACKTEST_PERIOD = "60d"       # Historie für den Backtest (yfinance-Maximum für 15m)
+BACKTEST_CSV_FILE = "backtest_results.csv"  # Einzelsignale, relativ zum Projektordner
