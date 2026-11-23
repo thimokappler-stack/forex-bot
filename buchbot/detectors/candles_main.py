@@ -269,6 +269,7 @@ def detect_patterns(df, atr, i=None):
 
 
 SOURCE = "candles_main"
+PATTERN_SIZES = {p.name: p.size for p in PATTERNS}
 
 
 def detect(df, config):
@@ -285,6 +286,8 @@ def detect(df, config):
     last_close = float(df["close"].iloc[i])
     signals = []
     for hit in detect_patterns(df, atr, i):
+        n = PATTERN_SIZES[hit["name"]]
+        window = df.iloc[i - n + 1:i + 1]
         signals.append(Signal(
             time=hit["time"] + pd.Timedelta(config.INTERVAL),
             symbol=config.SYMBOL,
@@ -294,6 +297,11 @@ def detect(df, config):
             direction=hit["signal"],
             entry=last_close,
             atr=float(atr.iloc[i]),
-            tags={"required_trend": hit["required_trend"]},
+            tags={
+                "required_trend": hit["required_trend"],
+                "n_candles": n,
+                "pattern_low": float(window["low"].min()),
+                "pattern_high": float(window["high"].max()),
+            },
         ))
     return signals

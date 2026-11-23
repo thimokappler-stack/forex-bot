@@ -76,8 +76,51 @@ class TestCandlesMainDetect:
         assert hit.atr > 0
         assert not math.isnan(hit.atr)
         assert hit.time == df.index[-1] + pd.Timedelta("15min")
-        assert hit.tags == {"required_trend": "down"}
+        assert hit.tags == {
+            "required_trend": "down",
+            "n_candles": 2,
+            "pattern_low": pytest.approx(1.0985),
+            "pattern_high": pytest.approx(1.1030),
+        }
         assert hit.sl is None and hit.tp is None
+
+    def test_pattern_tags_span_all_pattern_candles_only(self):
+        # Ein Extrem außerhalb des Musters (Kerze vor dem Muster) darf nicht zählen
+        outside = Candle(1.2000, 1.2500, 1.1900, 1.2000)
+        df = make_df([outside] + FILLER + ENG_POS)
+        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+
+        hit = next(s for s in candles_main.detect(df, cfg) if s.pattern == "Bullish Engulfing")
+
+        assert hit.tags["pattern_low"] == pytest.approx(1.0985)
+        assert hit.tags["pattern_high"] == pytest.approx(1.1030)
+
+    def test_five_candle_pattern_tags_cover_all_five_candles(self):
+        # Extreme der Kerze vor dem Muster dürfen nicht in pattern_low/high landen
+        outside = Candle(1.2000, 1.2500, 1.0900, 1.2000)
+        rise_five = [
+            Candle(1.0990, 1.1025, 1.0988, 1.1020),
+            Candle(1.0998, 1.1000, 1.0994, 1.0997),
+            Candle(1.0997, 1.0999, 1.0993, 1.0996),
+            Candle(1.0996, 1.0998, 1.0992, 1.0995),
+            Candle(1.0996, 1.1030, 1.0994, 1.1025),
+        ]
+        df = make_df([outside] + FILLER + rise_five)
+        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+
+        hit = next(s for s in candles_main.detect(df, cfg) if s.pattern == "Steigendes Dreier-Pattern")
+
+        assert hit.tags["n_candles"] == 5
+        assert hit.tags["pattern_low"] == pytest.approx(1.0988)
+        assert hit.tags["pattern_high"] == pytest.approx(1.1030)
+
+    def test_n_candles_matches_pattern_size(self):
+        df = make_df(FILLER + ENG_POS)
+        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+
+        hit = next(s for s in candles_main.detect(df, cfg) if s.pattern == "Bullish Engulfing")
+
+        assert hit.tags["n_candles"] == 2
 
     def test_signal_time_is_candle_close_time(self):
         df = make_df(FILLER + ENG_POS, start="2026-01-01 12:15")
