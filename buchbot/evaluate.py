@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from buchbot import config as default_config
+from buchbot import backtest
 from buchbot.backtest import (
     MAIN_PATTERN_NAMES,
     OUTCOME_NOT_EVALUATED,
@@ -27,7 +28,6 @@ from buchbot.backtest import (
     _trade,
     open_count,
     render_table,
-    simulate,
     summarize,
     write_csv,
 )
@@ -102,27 +102,36 @@ def signal_from_row(row, config):
     )
 
 
-def evaluate_rows(rows, df, config):
-    """Simuliert jedes Signal ab der Kerze nach seiner Signalkerze. Liefert Trades im Format des Backtests."""
-    trades = []
+def evaluate_rows(rows, df, config, allow_overlap=False):
+    """Simuliert die Signale ab der Kerze nach ihrer Signalkerze, mit derselben Überlappungsregel wie im Backtest.
+
+    Liefert (Trades, Anzahl übersprungener Signale, Anzahl zu alter Signale vor dem ersten Kerzenzeitpunkt).
+    """
+    found = []
+    missing = []
+    too_old = 0
     for row in rows:
         signal = signal_from_row(row, config)
         if signal is None:
             continue
         signal_candle = signal.time - pd.Timedelta(config.INTERVAL)
-        if signal_candle in df.index:
-            trade = simulate(signal, df, df.index.get_loc(signal_candle), config)
+        if signal_candle < df.index[0]:
+            too_old += 1
+        elif signal_candle in df.index:
+            found.append((df.index.get_loc(signal_candle), signal))
         else:
-            logger.warning("Signalkerze fehlt in den Kerzen, nicht ausgewertet: %s %s",
-                           signal.pattern, signal.time.isoformat())
-            outcome = OUTCOME_NOT_EVALUATED if signal.direction not in TRADED_DIRECTIONS else OUTCOME_OPEN
-            trade = _trade(signal, df, None, None, None, outcome, config)
-        trade["source"] = signal.source
-        trades.append(trade)
-    return trades
+            missing.append(signal)
+
+    trades, skipped = backtest.simulate_sequence(found, df, config, allow_overlap)
+    for signal in missing:
+        logger.warning("Signalkerze fehlt in den Kerzen, nicht ausgewertet: %s %s",
+                       signal.pattern, signal.time.isoformat())
+        outcome = OUTCOME_NOT_EVALUATED if signal.direction not in TRADED_DIRECTIONS else OUTCOME_OPEN
+        trades.append(_trade(signal, df, None, None, None, outcome, config))
+    return trades, sum(skipped.values()), too_old
 
 
-def main(config=default_config, fetch=get_candles, csv_path=None, out_path=None):
+def main(config=default_config, fetch=get_candles, csv_path=None, out_path=None, allow_overlap=False):
     path = Path(csv_path) if csv_path else BASE_DIR / config.SIGNALS_CSV_FILE
     if not path.exists():
         print(f"Signaldatei nicht gefunden: {path}")
@@ -142,15 +151,17 @@ def main(config=default_config, fetch=get_candles, csv_path=None, out_path=None)
         return 1
     df = remove_incomplete_candle(df, config.INTERVAL)
 
-    trades = evaluate_rows(rows, df, config)
-    if not trades:
+    trades, skipped, too_old = evaluate_rows(rows, df, config, allow_overlap)
+    if not trades and not too_old:
         print(f"Keine auswertbaren Signale in {path}")
         return 0
 
-    times = [t["signal_time"] for t in trades]
-    print(f"Signale in {path}: {len(rows)}, ausgewertet: {len(trades)}")
-    print(f"Zeitraum der CSV: {min(times).isoformat()} bis {max(times).isoformat()} (UTC)")
-    print(f"Kerzen für die Simulation: {df.index[0].isoformat()} bis {df.index[-1].isoformat()} (UTC)")
+    print(f"Signale in {path}: {len(rows)}")
+    if trades:
+        times = [t["signal_time"] for t in trades]
+        print(f"Zeitraum der CSV: {min(times).isoformat()} bis {max(times).isoformat()} (UTC)")
+    print(f"Kerzendaten decken den Zeitraum von {df.index[0].isoformat()} bis {df.index[-1].isoformat()} (UTC) ab")
+    print(f"Überlappung: {'erlaubt (--allow-overlap)' if allow_overlap else 'ein Trade je Muster gleichzeitig'}")
     print()
     for title, source, names in GROUPS:
         group = [t for t in trades if t["source"] == source]
@@ -158,6 +169,8 @@ def main(config=default_config, fetch=get_candles, csv_path=None, out_path=None)
         print(render_table(rows_by_pattern, total, config, title))
         print()
     print(f"offen: {open_count(trades)} (Haltefenster oder Signalkerze außerhalb der Kerzen, nicht in der Statistik)")
+    print(f"übersprungen: {skipped} (Muster hatte noch einen offenen Trade, nicht in der Statistik)")
+    print(f"zu alt für die Kerzendaten: {too_old} (Signalkerze vor dem ersten geladenen Kerzenzeitpunkt)")
 
     if out_path:
         write_csv(trades, out_path)
@@ -169,8 +182,10 @@ def cli(argv=None):
     parser = argparse.ArgumentParser(description="Auswertung der Schattenbetrieb-Signale aus signals_log.csv")
     parser.add_argument("--csv", help="Pfad zur Signaldatei (Standard: signals_log.csv im Projektordner)")
     parser.add_argument("--out", help="Einzelergebnisse als CSV schreiben, z. B. ergebnis.csv")
+    parser.add_argument("--allow-overlap", action="store_true",
+                        help="alle Signale auswerten, auch wenn für dasselbe Muster ein Trade offen ist")
     args = parser.parse_args(argv)
-    return main(csv_path=args.csv, out_path=args.out)
+    return main(csv_path=args.csv, out_path=args.out, allow_overlap=args.allow_overlap)
 
 
 if __name__ == "__main__":

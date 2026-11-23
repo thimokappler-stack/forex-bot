@@ -51,7 +51,7 @@ def write_csv(path, rows, fields=SIGNAL_FIELDS):
 
 
 def evaluate_one(df, config, **overrides):
-    trades = evaluate.evaluate_rows([signal_row(**overrides)], df, config)
+    trades, _, _ = evaluate.evaluate_rows([signal_row(**overrides)], df, config)
     assert len(trades) == 1
     return trades[0]
 
@@ -157,7 +157,79 @@ def test_evaluate_matches_backtest_r_for_same_signal(tmp_path):
 
     path = tmp_path / "signals_log.csv"
     write_csv(path, [signal_row()])
-    evaluate_trade = evaluate.evaluate_rows(evaluate.read_signal_rows(path), df, config)[0]
+    evaluate_trades, _, _ = evaluate.evaluate_rows(evaluate.read_signal_rows(path), df, config)
+    evaluate_trade = evaluate_trades[0]
 
     assert evaluate_trade["outcome"] == backtest_trade["outcome"]
     assert evaluate_trade["r"] == pytest.approx(backtest_trade["r"])
+
+
+OVERLAP_CANDLES = [
+    candle(1.1005, 1.0995, 1.1000),
+    candle(1.1010, 1.0995, 1.1005),
+    candle(1.1010, 1.0995, 1.1005),
+    candle(1.1045, 1.1000, 1.1040),
+    candle(1.1010, 1.0995),
+    candle(1.1010, 1.0995),
+]
+
+
+def test_overlapping_signal_of_same_pattern_is_skipped_by_default():
+    df = make_df(OVERLAP_CANDLES)
+    config = make_config(MAX_HOLD_CANDLES=3)
+    rows = [signal_row(), signal_row(time="2026-01-05T10:30:00+00:00")]
+    trades, skipped, too_old = evaluate.evaluate_rows(rows, df, config)
+    assert len(trades) == 1
+    assert trades[0]["outcome"] == backtest.OUTCOME_TP
+    assert skipped == 1
+    assert too_old == 0
+
+
+def test_allow_overlap_evaluates_all_signals():
+    df = make_df(OVERLAP_CANDLES)
+    config = make_config(MAX_HOLD_CANDLES=3)
+    rows = [signal_row(), signal_row(time="2026-01-05T10:30:00+00:00")]
+    trades, skipped, _ = evaluate.evaluate_rows(rows, df, config, allow_overlap=True)
+    assert len(trades) == 2
+    assert skipped == 0
+
+
+def test_backtest_and_evaluate_agree_on_overlapping_signals(tmp_path, monkeypatch):
+    df = make_df(OVERLAP_CANDLES)
+    config = make_config(MAX_HOLD_CANDLES=3)
+    first = evaluate.signal_from_row(signal_row(), config)
+    second = evaluate.signal_from_row(signal_row(time="2026-01-05T10:30:00+00:00"), config)
+    monkeypatch.setattr(backtest, "find_signals", lambda df, config: ([(0, first), (1, second)], {}))
+
+    bt_trades, bt_funnel = backtest.run_backtest(df, config)
+
+    path = tmp_path / "signals_log.csv"
+    write_csv(path, [signal_row(), signal_row(time="2026-01-05T10:30:00+00:00")])
+    ev_trades, ev_skipped, _ = evaluate.evaluate_rows(evaluate.read_signal_rows(path), df, config)
+
+    assert [(t["outcome"], t["r"]) for t in ev_trades] == [(t["outcome"], t["r"]) for t in bt_trades]
+    assert bt_funnel["uebersprungen"]["Bullish Engulfing"] == 1
+    assert ev_skipped == 1
+
+
+def test_signals_before_first_candle_counted_as_too_old_not_open():
+    df = make_df(OVERLAP_CANDLES)
+    config = make_config(MAX_HOLD_CANDLES=3)
+    rows = [signal_row(time="2026-01-05T10:00:00+00:00")]
+    trades, skipped, too_old = evaluate.evaluate_rows(rows, df, config)
+    assert trades == []
+    assert skipped == 0
+    assert too_old == 1
+
+
+def test_main_prints_too_old_line_with_data_range(tmp_path, capsys):
+    df = make_df(OVERLAP_CANDLES)
+    path = tmp_path / "signals_log.csv"
+    write_csv(path, [signal_row(time="2026-01-05T10:00:00+00:00")])
+
+    exit_code = evaluate.main(config=make_config(MAX_HOLD_CANDLES=3), fetch=lambda *a, **k: df, csv_path=path)
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "zu alt für die Kerzendaten: 1" in out
+    assert "decken den Zeitraum von 2026-01-05T10:00:00+00:00 bis" in out

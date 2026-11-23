@@ -70,6 +70,7 @@ def find_signals(df, config):
 def _trade(signal, df, pos, exit_pos, exit_price, outcome, config):
     trade = {
         "pattern": signal.pattern,
+        "source": signal.source,
         "direction": signal.direction,
         "signal_time": signal.time,
         "entry": signal.entry,
@@ -121,30 +122,42 @@ def simulate(signal, df, pos, config):
     return _trade(signal, df, pos, end, df["close"].iloc[end], OUTCOME_TIMEOUT, config)
 
 
-def run_backtest(df, config):
-    """Simuliert alle Signale. Solange für ein Muster eine Position offen ist, werden dessen Signale ignoriert.
+def simulate_sequence(found, df, config, allow_overlap=False):
+    """Simuliert (Position, Signal)-Paare in Positionsreihenfolge.
 
-    NEUTRAL-Signale werden nur gezählt (nicht simuliert, blockieren nichts).
-    Liefert (Trades, Trichter-Zähler je Stufe inklusive Simulationsstufen).
+    Solange für ein Muster eine Position offen ist (bis zum Ausstieg), werden dessen weitere Signale
+    übersprungen, außer allow_overlap ist True. NEUTRAL-Signale werden nur gezählt und blockieren nichts.
+    Liefert (Trades, Zähler der übersprungenen Signale je Muster).
     """
     trades = []
+    skipped = Counter()
     busy_until = {}
-    found, funnel = find_signals(df, config)
-    for stage in TRADE_STAGES:
-        funnel[stage] = Counter()
-    for pos, signal in found:
+    for pos, signal in sorted(found, key=lambda item: item[0]):
         if signal.direction not in TRADED_DIRECTIONS:
             trades.append(simulate(signal, df, pos, config))
             continue
-        if busy_until.get(signal.pattern, -1) >= pos:
-            funnel["uebersprungen"][signal.pattern] += 1
+        if not allow_overlap and busy_until.get(signal.pattern, -1) >= pos:
+            skipped[signal.pattern] += 1
             continue
         trade = simulate(signal, df, pos, config)
         busy_until[signal.pattern] = trade["exit_pos"]
         trades.append(trade)
-        funnel["simuliert"][signal.pattern] += 1
+    return trades, skipped
+
+
+def run_backtest(df, config):
+    """Liefert (Trades, Trichter-Zähler je Stufe inklusive Simulationsstufen)."""
+    found, funnel = find_signals(df, config)
+    for stage in TRADE_STAGES:
+        funnel[stage] = Counter()
+    trades, skipped = simulate_sequence(found, df, config)
+    funnel["uebersprungen"].update(skipped)
+    for trade in trades:
+        if trade["direction"] not in TRADED_DIRECTIONS:
+            continue
+        funnel["simuliert"][trade["pattern"]] += 1
         if trade["outcome"] == OUTCOME_OPEN:
-            funnel["offen"][signal.pattern] += 1
+            funnel["offen"][trade["pattern"]] += 1
     return trades, funnel
 
 
