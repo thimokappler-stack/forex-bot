@@ -54,6 +54,7 @@ bot.log
 
 # Project-specific
 state.json
+state_*.json
 *.csv
 backtest_results.csv
 temp_*.py
