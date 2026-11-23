@@ -145,6 +145,18 @@ def test_missing_columns_give_clear_error(tmp_path, capsys):
     assert "Pflichtspalten fehlen" in capsys.readouterr().out
 
 
+def test_csv_ohne_market_spalte_wird_als_eurusd_gelesen(tmp_path, caplog):
+    path = tmp_path / "signals_log.csv"
+    write_csv(path, [signal_row()])
+
+    with caplog.at_level("INFO"):
+        rows = evaluate.read_signal_rows(path)
+
+    assert len(rows) == 1
+    assert rows[0]["market"] == default_config.DEFAULT_MARKET == "EURUSD"
+    assert "altes Format" in caplog.text
+
+
 def test_evaluate_matches_backtest_r_for_same_signal(tmp_path):
     df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1045, 1.1000)])
     config = make_config()

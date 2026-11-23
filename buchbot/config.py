@@ -29,13 +29,13 @@ MARKETS = {
         "price_decimals": 5, "detectors": None,
     },
     "BTC": {
-        "display": "BTC/USD", "symbol": "BTC-USD", "hours": "24_7",
+        "display": "Bitcoin", "symbol": "BTC-USD", "hours": "24_7",
         "pip_size": 1.0, "risk_unit": "USD", "min_sl_pips": 10, "spread_pips": 10.0,
         "tweezer_tolerance": None, "tweezer_atr_fraction": 0.15,
         "price_decimals": 2, "detectors": None,
     },
     "ETH": {
-        "display": "ETH/USD", "symbol": "ETH-USD", "hours": "24_7",
+        "display": "Ethereum", "symbol": "ETH-USD", "hours": "24_7",
         "pip_size": 1.0, "risk_unit": "USD", "min_sl_pips": 5, "spread_pips": 5.0,
         "tweezer_tolerance": None, "tweezer_atr_fraction": 0.15,
         "price_decimals": 2, "detectors": None,

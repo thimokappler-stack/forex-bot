@@ -184,8 +184,8 @@ Ein Lauf von `python -m buchbot.main` wertet alle Märkte nacheinander aus:
 |---|---|---|---|
 | `EURUSD` | EUR/USD | `EURUSD=X` | Forex (Fr 22:00 bis So 22:00 UTC geschlossen) |
 | `GBPUSD` | GBP/USD | `GBPUSD=X` | Forex |
-| `BTC` | BTC/USD | `BTC-USD` | 24/7 |
-| `ETH` | ETH/USD | `ETH-USD` | 24/7 |
+| `BTC` | Bitcoin | `BTC-USD` | 24/7 |
+| `ETH` | Ethereum | `ETH-USD` | 24/7 |
 
 Ein Fehler in einem Markt (Abruf, Daten) bricht die übrigen Märkte nicht ab. Exit-Code 1 gibt es nur bei unerwarteten Fehlern. Zustand (`state_new.json`, Schlüssel mit Markt), CSV (`signals_log.csv`, Spalte `market`) und Betreff (z. B. `[BUCH] BUY GBP/USD – Morning Star (15m)`) sind je Markt getrennt.
 

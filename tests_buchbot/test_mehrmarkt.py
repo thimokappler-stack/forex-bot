@@ -111,6 +111,13 @@ def test_betreff_nennt_den_markt():
     assert subject == "[BUCH] BUY GBP/USD – Morning Star (15m)"
 
 
+def test_betreff_nutzt_anzeigenamen_bitcoin_und_ethereum():
+    btc = mail.build_subject([make_signal()], for_market("BTC"))
+    eth = mail.build_subject([make_signal()], for_market("ETH"))
+    assert btc.startswith("[BUCH] BUY Bitcoin")
+    assert eth.startswith("[BUCH] BUY Ethereum")
+
+
 # --- Fehler in einem Markt stoppt die anderen nicht ---
 
 def test_fehler_in_einem_markt_beeinflusst_die_anderen_nicht(tmp_path):
@@ -229,7 +236,7 @@ def test_backtest_gibt_tabelle_je_markt_und_uebergibt_period(tmp_path):
     out = io.StringIO()
     with redirect_stdout(out):
         backtest.main(markets=["BTC"], fetch=fetch, csv_path=str(tmp_path / "bt.csv"))
-    assert "=== BTC/USD (BTC) ===" in out.getvalue()
+    assert "=== Bitcoin (BTC) ===" in out.getvalue()
     assert calls == [("BTC-USD", real_config.BACKTEST_PERIOD)]
     assert real_config.BACKTEST_PERIOD == "60d"
 

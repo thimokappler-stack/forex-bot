@@ -7,6 +7,7 @@ CSV: Semikolon als Trennzeichen, utf-8-sig, Kopfzeile nur beim Anlegen der Datei
 import csv
 import logging
 import os
+from datetime import datetime
 
 import pandas as pd
 
@@ -54,12 +55,33 @@ def signal_row(signal, df, interval, config=None):
     return row
 
 
+def _header_matches(path):
+    with open(path, encoding=CSV_ENCODING, newline="") as f:
+        header = next(csv.reader(f, delimiter=CSV_DELIMITER), None)
+    return header == COLUMNS
+
+
+def _archive(path):
+    base, ext = os.path.splitext(path)
+    target = f"{base}_alt_{datetime.now().strftime('%Y%m%d-%H%M%S')}{ext}"
+    os.replace(path, target)
+    logger.warning("Kopfzeile von %s passt nicht zur aktuellen Version: alte Datei umbenannt nach %s",
+                   path, target)
+
+
 def append_signals(signals, df, interval, path, config=None):
-    """Hängt die Signale an die CSV-Datei an. Kopfzeile nur, wenn die Datei neu ist."""
+    """Hängt die Signale an die CSV-Datei an. Kopfzeile nur, wenn die Datei neu ist.
+
+    Hat eine vorhandene Datei eine andere Kopfzeile, wird sie umbenannt und neu angelegt.
+    """
     if not signals:
         return
     config = _default_config(config)
-    write_header = not os.path.exists(path) or os.path.getsize(path) == 0
+    exists = os.path.exists(path) and os.path.getsize(path) > 0
+    if exists and not _header_matches(path):
+        _archive(path)
+        exists = False
+    write_header = not exists
     rows = [signal_row(signal, df, interval, config) for signal in signals]
     with open(path, "a", newline="", encoding=CSV_ENCODING) as f:
         writer = csv.DictWriter(f, fieldnames=COLUMNS, delimiter=CSV_DELIMITER)

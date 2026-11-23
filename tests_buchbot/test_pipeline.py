@@ -127,13 +127,17 @@ def test_modus_off_erzeugt_nichts(registry, paths, smtp):
     assert smtp.instances == []
 
 
-def test_modus_notify_mit_deaktiviertem_schalter_sendet_nichts(registry, paths, smtp):
+def test_modus_notify_mit_deaktiviertem_schalter_loggt_ohne_mail(registry, paths, smtp):
     cfg = make_config(DETECTORS={"dummy": "notify"}, NOTIFY_ENABLED=False)
     summary = run_one(now=NOW, config=cfg, fetch=fake_fetch(make_candles()), **paths)
     assert summary["mailed"] == 0
     assert smtp.instances == []
-    assert not __import__("os").path.exists(paths["csv_path"])
-    assert state_store.load_state(paths["state_path"])["sent"] == {}
+    rows = pd.read_csv(paths["csv_path"], sep=";", encoding="utf-8-sig")
+    assert len(rows) == 1
+    entry = state_store.load_state(paths["state_path"])["sent"]
+    (value,) = entry.values()
+    assert value["logged"] is not None
+    assert value["mailed"] is None
 
 
 def test_zurueckgestellte_mail_wird_nach_aktivierung_genau_einmal_gesendet(registry, paths, smtp):
@@ -179,14 +183,59 @@ def test_fehlgeschlagener_versand_wird_nicht_als_gesendet_markiert(registry, pat
     smtp.fail = True
     first = run_one(now=NOW, config=cfg, fetch=fetch, **paths)
     assert first["mailed"] == 0
-    assert not __import__("os").path.exists(paths["csv_path"])
-    state_after_fail = state_store.load_state(paths["state_path"])
-    assert state_after_fail["sent"] == {}
+    rows = pd.read_csv(paths["csv_path"], sep=";", encoding="utf-8-sig")
+    assert len(rows) == 1
+    (value,) = state_store.load_state(paths["state_path"])["sent"].values()
+    assert value["logged"] is not None
+    assert value["mailed"] is None
 
     smtp.fail = False
     second = run_one(now=NOW, config=cfg, fetch=fetch, **paths)
     assert second["new"] == 1
     assert second["mailed"] == 1
+    assert len(smtp.instances[-1].sent) == 1
+    rows = pd.read_csv(paths["csv_path"], sep=";", encoding="utf-8-sig")
+    assert len(rows) == 1
+
+
+def test_fehlgeschlagener_lauf_wird_einen_lauf_spaeter_genau_einmal_gemailt(registry, paths, smtp):
+    cfg = make_config(DETECTORS={"dummy": "notify"}, NOTIFY_ENABLED=True)
+    fetch = fake_fetch(make_candles())
+    smtp.fail = True
+    run_one(now=NOW, config=cfg, fetch=fetch, **paths)
+
+    smtp.fail = False
+    run_one(now=NOW + pd.Timedelta(minutes=15), config=cfg, fetch=fetch, **paths)
+    third = run_one(now=NOW + pd.Timedelta(minutes=30), config=cfg, fetch=fetch, **paths)
+
+    assert third["mailed"] == 0
+    assert sum(len(i.sent) for i in smtp.instances if i.sent) == 1
+
+
+def test_signal_ohne_mail_wird_nach_aktivierung_im_fenster_einmal_gemailt(registry, paths, smtp):
+    cfg_off = make_config(DETECTORS={"dummy": "notify"}, NOTIFY_ENABLED=False)
+    run_one(now=NOW, config=cfg_off, fetch=fake_fetch(make_candles()), **paths)
+
+    one_later = NOW + pd.Timedelta(minutes=15)
+    cfg_on = make_config(DETECTORS={"dummy": "notify"}, NOTIFY_ENABLED=True)
+    second = run_one(now=one_later, config=cfg_on, fetch=fake_fetch(make_candles(periods=41)), **paths)
+    assert second["mailed"] == 1
+    assert len(smtp.instances[0].sent) == 1
+
+    third = run_one(now=one_later, config=cfg_on, fetch=fake_fetch(make_candles(periods=41)), **paths)
+    assert third["mailed"] == 0
+    assert len(smtp.instances) == 1
+
+
+def test_signal_ausserhalb_des_fensters_wird_nicht_nachtraeglich_gemailt(registry, paths, smtp):
+    cfg_off = make_config(DETECTORS={"dummy": "notify"}, NOTIFY_ENABLED=False)
+    run_one(now=NOW, config=cfg_off, fetch=fake_fetch(make_candles()), **paths)
+
+    cfg_on = make_config(DETECTORS={"dummy": "notify"}, NOTIFY_ENABLED=True, EVAL_WINDOW_CANDLES=1)
+    summary = run_one(now=NOW + pd.Timedelta(minutes=15), config=cfg_on,
+                      fetch=fake_fetch(make_candles(periods=41)), **paths)
+    assert summary["mailed"] == 0
+    assert smtp.instances == []
 
 
 def test_wochenende_wertet_nichts_aus_und_loggt(registry, paths, caplog):

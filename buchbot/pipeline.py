@@ -103,38 +103,42 @@ def run_market(config, now, dry_run, fetch=get_candles, state_path=None, csv_pat
     summary["signals"] = len(signals)
 
     state = state_store.load_state(state_path)
-    new = [s for s in signals if not state_store.is_sent(state, state_store.signal_key(s))]
-    summary["new"] = len(new)
-    logger.info("Lauf: %d Signal(e), davon %d neu", len(signals), len(new))
-    if not new:
+    to_log = [s for s in signals if not state_store.is_logged(state, state_store.signal_key(s))]
+    mail_candidates = [
+        s for s in signals
+        if s.mode == "notify" and s.source not in LOG_ONLY_DETECTORS
+        and not state_store.is_mailed(state, state_store.signal_key(s))
+    ]
+    to_mail = mail_candidates if config.NOTIFY_ENABLED else []
+    if mail_candidates and not to_mail:
+        logger.info("[%s] Mail deaktiviert: %d Signal(e) nur im Log und in der CSV",
+                    config.MARKET, len(mail_candidates))
+
+    pending_ids = {id(s) for s in to_log} | {id(s) for s in to_mail}
+    summary["new"] = len(pending_ids)
+    logger.info("Lauf: %d Signal(e), davon %d offen", len(signals), len(pending_ids))
+    if not pending_ids:
         return summary
 
-    log_csv.log_signals(new, config)
+    log_csv.log_signals(to_log, config)
     if dry_run:
         logger.info("Probelauf mit --at: keine Mail, kein CSV-Eintrag, kein Zustandswechsel")
         return summary
 
-    # Signale im Modus notify, die nicht gemailt werden (Schalter aus oder Versand fehlgeschlagen),
-    # bleiben ungeloggt und ungemerkt, damit sie in einem späteren Lauf gesendet werden können.
-    notify = [s for s in new if s.mode == "notify" and s.source not in LOG_ONLY_DETECTORS]
-    deferred_ids = set()
-    if notify and not config.NOTIFY_ENABLED:
-        logger.info("[%s] Mail deaktiviert: %d Signal(e) werden zurückgestellt", config.MARKET, len(notify))
-        deferred_ids = {id(s) for s in notify}
-    elif notify:
-        sent = mail.send_notifications(notify, config)
+    if to_log:
+        log_csv.append_signals(to_log, df, config.INTERVAL, csv_path, config)
+        for signal in to_log:
+            state_store.mark_logged(state, state_store.signal_key(signal), now)
+
+    if to_mail:
+        sent = mail.send_notifications(to_mail, config)
         summary["mailed"] = len(sent)
-        sent_ids = {id(s) for s in sent}
-        deferred_ids = {id(s) for s in notify if id(s) not in sent_ids}
+        for signal in sent:
+            state_store.mark_mailed(state, state_store.signal_key(signal), now)
 
-    handled = [s for s in new if id(s) not in deferred_ids]
-    log_csv.append_signals(handled, df, config.INTERVAL, csv_path, config)
-    for signal in handled:
-        state_store.mark_sent(state, state_store.signal_key(signal), now)
     state_store.save_state(state_path, state, now, config.STATE_RETENTION_DAYS)
-
-    logger.info("[%s] Lauf beendet: %d verarbeitet, %d per Mail gesendet, %d zurückgestellt",
-                config.MARKET, len(handled), summary["mailed"], len(deferred_ids))
+    logger.info("[%s] Lauf beendet: %d in CSV, %d per Mail gesendet, %d Mail(s) fehlgeschlagen",
+                config.MARKET, len(to_log), summary["mailed"], len(to_mail) - summary["mailed"])
     return summary
 
 

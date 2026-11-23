@@ -120,3 +120,30 @@ def test_log_zeigt_preise_mit_fuenf_nachkommastellen(caplog):
     with caplog.at_level("INFO"):
         log_csv.log_signals([signal])
     assert "Einstieg=1.10099" in caplog.text
+
+
+def test_alte_kopfzeile_wird_umbenannt_und_neu_angelegt(tmp_path, caplog):
+    path = tmp_path / "signals_log.csv"
+    path.write_text("time;symbol;pattern\n2026-05-05T10:15:00+00:00;EURUSD=X;Morning Star\n",
+                    encoding="utf-8-sig")
+
+    with caplog.at_level("WARNING"):
+        log_csv.append_signals([make_signal()], make_df(), "15m", str(path))
+
+    archived = list(tmp_path.glob("signals_log_alt_*.csv"))
+    assert len(archived) == 1
+    assert read_rows(archived[0])[0] == ["time", "symbol", "pattern"]
+    rows = read_rows(path)
+    assert rows[0] == log_csv.COLUMNS
+    assert len(rows) == 2
+    assert "passt nicht zur aktuellen Version" in caplog.text
+
+
+def test_passende_kopfzeile_wird_nicht_umbenannt(tmp_path):
+    path = tmp_path / "signals_log.csv"
+    df = make_df()
+    log_csv.append_signals([make_signal()], df, "15m", str(path))
+    log_csv.append_signals([make_signal(pattern="Evening Star")], df, "15m", str(path))
+
+    assert list(tmp_path.glob("signals_log_alt_*.csv")) == []
+    assert len(read_rows(path)) == 3

@@ -55,7 +55,13 @@ def read_signal_rows(path):
         missing = [column for column in REQUIRED_COLUMNS if column not in reader.fieldnames]
         if missing:
             raise ValueError(f"Pflichtspalten fehlen: {', '.join(missing)}")
-        return list(reader)
+        rows = list(reader)
+        if "market" not in reader.fieldnames:
+            logger.info("CSV ohne Spalte market (altes Format): Zeilen werden als %s gelesen",
+                        default_config.DEFAULT_MARKET)
+            for row in rows:
+                row["market"] = default_config.DEFAULT_MARKET
+        return rows
 
 
 def _optional_float(value):
