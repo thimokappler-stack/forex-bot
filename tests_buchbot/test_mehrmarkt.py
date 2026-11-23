@@ -248,6 +248,46 @@ def test_backtest_csv_pfad_ist_je_einzelmarkt_getrennt():
     assert backtest.default_csv_path(["EURUSD", "BTC"]).name == real_config.BACKTEST_CSV_FILE
 
 
+def _ohlc_candles(freq, periods, start="2026-05-06 00:00"):
+    idx = pd.date_range(start, periods=periods, freq=freq, tz="UTC")
+    close = [1.1000 + i * 0.00001 for i in range(periods)]
+    return pd.DataFrame({"open": close, "high": [c + 0.0005 for c in close],
+                         "low": [c - 0.0005 for c in close], "close": close}, index=idx)
+
+
+def test_evaluate_ruft_je_markt_das_eigene_intervall_und_zeitraum_ab(tmp_path):
+    from tests_buchbot.test_evaluate import signal_row, write_csv, SIGNAL_FIELDS
+
+    csv_path = tmp_path / "signals_log.csv"
+    rows = [
+        {**signal_row(time="2026-05-06T08:30:00+00:00", interval="30m"), "market": "EURUSD_30M"},
+        {**signal_row(time="2026-05-06T10:00:00+00:00", interval="15m"), "market": "EURUSD"},
+    ]
+    write_csv(csv_path, rows, fields=SIGNAL_FIELDS + ["market"])
+    frames = {"30m": _ohlc_candles("30min", 60), "15m": _ohlc_candles("15min", 120)}
+    calls = []
+
+    def fetch(symbol, interval, lookback=None, period=None):
+        calls.append((symbol, interval, period))
+        return frames[interval].copy()
+
+    expected = {"EURUSD_30M": ("EUR/USD (30m)", "30m"), "EURUSD": ("EUR/USD", "15m")}
+    for market, (display, interval) in expected.items():
+        out = io.StringIO()
+        with redirect_stdout(out):
+            assert evaluate.main(csv_path=str(csv_path), markets=[market], fetch=fetch) == 0
+        text = out.getvalue()
+        assert f"=== {display} ({market}) ===" in text
+        assert "Signale in der CSV: 1" in text
+        assert "offen: 0 " in text, "Signalkerze muss im Kerzenraster des Markts liegen"
+
+    assert calls == [
+        ("EURUSD=X", "30m", real_config.BACKTEST_PERIOD),
+        ("EURUSD=X", "15m", real_config.BACKTEST_PERIOD),
+    ]
+    assert real_config.BACKTEST_PERIOD == "60d"
+
+
 def test_evaluate_waehlt_markt_per_spalte(tmp_path):
     csv_path = tmp_path / "signals_log.csv"
     rows = [
