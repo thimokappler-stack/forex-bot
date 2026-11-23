@@ -124,7 +124,7 @@ MAIL_TIMEOUT_SECONDS = 30
 MAIL_DISCLAIMER = "Kein Anlagerat, nur Mustererkennung."
 
 # === BACKTEST ===
-MAX_HOLD_MINUTES = 480        # Max Haltedauer: 8 Stunden, je Markt in Kerzen umgerechnet (15m: 32, 30m: 16)
+MAX_HOLD_CANDLES = 32         # Max Haltedauer in Kerzen (15m: 8 Stunden, 30m: 16 Stunden), je Markt überschreibbar
 MIN_SIGNALS_FOR_STATS = 30    # Minimum Signale für belastbare Backtest-Aussage
 BACKTEST_PERIOD = "60d"       # Historie für den Backtest (yfinance-Maximum für 15m)
 BACKTEST_CSV_FILE = "backtest_results.csv"  # Einzelsignale, relativ zum Projektordner
@@ -226,7 +226,7 @@ def for_market(name, settings=None):
                             f"(erlaubt: {', '.join(INTERVAL_MINUTES)})")
     minutes = INTERVAL_MINUTES[cfg.INTERVAL]
     cfg.STALE_MAX_MINUTES = STALE_CANDLES * minutes
-    cfg.MAX_HOLD_CANDLES = MAX_HOLD_MINUTES // minutes
+    cfg.MAX_HOLD_CANDLES = market.get("max_hold_candles", MAX_HOLD_CANDLES)
     cfg.OBSERVE_ONLY = market.get("observe_only", False)
     cfg.DETECTORS = {**DETECTORS, **(market["detectors"] or {}), **settings["detector_modes"]}
     if cfg.OBSERVE_ONLY:

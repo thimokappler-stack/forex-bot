@@ -147,7 +147,7 @@ Alle Parameter sind an einer Stelle und einfach änderbar:
 | `MIN_SL_PIPS` | `5` | Min. Risiko in Pips; kleinere Signale verworfen |
 | `RISK_REWARD` | `2.0` | Take-Profit = 2 × Risiko → CRV 1:2 |
 | `PIP_SIZE` | `0.0001` | Pip-Größe EUR/USD |
-| `MAX_HOLD_CANDLES` | `32` | Backtest: max Haltedauer (8 Stunden) |
+| `MAX_HOLD_CANDLES` | `32` | Backtest: max Haltedauer in Kerzen (15m: 8 Stunden, 30m: 16 Stunden), je Markt überschreibbar |
 | `SPREAD_PIPS` | `1.0` | Backtest: angenommener Spread |
 
 ## Stop-Loss & Take-Profit

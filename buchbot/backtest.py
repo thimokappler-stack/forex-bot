@@ -292,6 +292,13 @@ def _print_report(df, cfg, trades, funnel):
     print()
 
 
+def default_csv_path(markets=None):
+    """Einzelmarkt-Lauf: backtest_results_<MARKT>.csv, sonst backtest_results.csv (überschreibt sich nicht gegenseitig)."""
+    if markets and len(markets) == 1:
+        return BASE_DIR / f"backtest_results_{markets[0]}.csv"
+    return BASE_DIR / default_config.BACKTEST_CSV_FILE
+
+
 def main(markets=None, fetch=get_candles, csv_path=None):
     """Backtest je Markt. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte."""
     names = list(markets) if markets else list(default_config.MARKETS)
@@ -312,7 +319,7 @@ def main(markets=None, fetch=get_candles, csv_path=None):
         all_trades.extend(trades)
         _print_report(df, cfg, trades, funnel)
 
-    path = csv_path or BASE_DIR / default_config.BACKTEST_CSV_FILE
+    path = csv_path or default_csv_path(markets)
     write_csv(all_trades, path)
     print(f"Einzelsignale: {path}")
     return status

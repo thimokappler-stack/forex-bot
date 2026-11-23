@@ -91,10 +91,18 @@ def test_30m_markt_hat_intervall_stale_schwelle_und_haltedauer():
     cfg = for_market("EURUSD_30M")
     assert cfg.INTERVAL == "30m"
     assert cfg.STALE_MAX_MINUTES == 90
-    assert cfg.MAX_HOLD_CANDLES == 16
+    assert cfg.MAX_HOLD_CANDLES == 32
     assert cfg.DISPLAY_SYMBOL == "EUR/USD (30m)"
     assert cfg.SYMBOL == "EURUSD=X"
     assert set(cfg.DETECTORS.values()) == {"log_only"}
+
+
+def test_haltedauer_ist_in_kerzen_und_je_markt_ueberschreibbar(monkeypatch):
+    for name in ("EURUSD", "GBPUSD", "BTC", "ETH", "EURUSD_30M"):
+        assert for_market(name).MAX_HOLD_CANDLES == 32, name
+    monkeypatch.setitem(MARKETS["BTC"], "max_hold_candles", 96)
+    assert for_market("BTC").MAX_HOLD_CANDLES == 96
+    assert for_market("EURUSD").MAX_HOLD_CANDLES == 32
 
 
 def test_bestehende_maerkte_bleiben_bei_15m_und_unveraenderten_werten():

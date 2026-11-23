@@ -241,6 +241,13 @@ def test_backtest_gibt_tabelle_je_markt_und_uebergibt_period(tmp_path):
     assert real_config.BACKTEST_PERIOD == "60d"
 
 
+def test_backtest_csv_pfad_ist_je_einzelmarkt_getrennt():
+    assert backtest.default_csv_path(["EURUSD"]).name == "backtest_results_EURUSD.csv"
+    assert backtest.default_csv_path(["EURUSD_30M"]).name == "backtest_results_EURUSD_30M.csv"
+    assert backtest.default_csv_path(None).name == real_config.BACKTEST_CSV_FILE
+    assert backtest.default_csv_path(["EURUSD", "BTC"]).name == real_config.BACKTEST_CSV_FILE
+
+
 def test_evaluate_waehlt_markt_per_spalte(tmp_path):
     csv_path = tmp_path / "signals_log.csv"
     rows = [
