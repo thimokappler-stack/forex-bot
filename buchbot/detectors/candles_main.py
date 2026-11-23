@@ -11,7 +11,11 @@ in zeitlicher Reihenfolge, die letzte Kerze ist die des Musters.
 import math
 from collections import namedtuple
 
+import pandas as pd
+
 import buchbot.config as cfg
+from buchbot.data import calculate_atr
+from buchbot.models import Signal
 
 
 Candle = namedtuple("Candle", ["open", "high", "low", "close"])
@@ -262,3 +266,34 @@ def detect_patterns(df, atr, i=None):
                 "time": df.index[i],
             })
     return found
+
+
+SOURCE = "candles_main"
+
+
+def detect(df, config):
+    """
+    Detektor-Einstieg: liefert Signal-Objekte für die letzte Kerze.
+
+    SL/TP und Trendfilter werden hier noch nicht berechnet.
+    """
+    atr = calculate_atr(df, period=config.ATR_PERIOD)
+    if atr is None:
+        return []
+
+    i = len(df) - 1
+    last_close = float(df["close"].iloc[i])
+    signals = []
+    for hit in detect_patterns(df, atr, i):
+        signals.append(Signal(
+            time=hit["time"] + pd.Timedelta(config.INTERVAL),
+            symbol=config.SYMBOL,
+            interval=config.INTERVAL,
+            source=SOURCE,
+            pattern=hit["name"],
+            direction=hit["signal"],
+            entry=last_close,
+            atr=float(atr.iloc[i]),
+            tags={"required_trend": hit["required_trend"]},
+        ))
+    return signals

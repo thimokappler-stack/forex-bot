@@ -53,6 +53,13 @@ MIN_SL_PIPS = 5               # Mindestabstand Einstieg bis SL in Pips
 RISK_REWARD = 2.0             # Take-Profit = 2 × Risiko → CRV 1:2
 PIP_SIZE = 0.0001             # Pip-Größe bei EUR/USD
 
+# === DETEKTOREN ===
+# Betrieb je Detektor: "off", "log_only" (nur Log/CSV), "notify" (E-Mail)
+DETECTORS = {
+    "candles_main": "log_only",
+    "candles_single": "off",
+}
+
 # === BACKTEST ===
 MAX_HOLD_CANDLES = 32         # Max Haltedauer: 32 Kerzen = 8 Stunden
 SPREAD_PIPS = 1.0             # Angenommener Spread in Pips

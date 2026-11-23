@@ -211,7 +211,7 @@ class TestGetCandles:
         return pd.DataFrame(data, index=index, columns=cols)
 
     def test_get_candles_flattens_columns_and_converts_to_utc(self, monkeypatch):
-        import buchbot.data as data_new
+        import buchbot.data as data
 
         index = pd.date_range("2026-11-20 10:00", periods=5, freq="15min", tz="Europe/Berlin")
         calls = {}
@@ -220,8 +220,8 @@ class TestGetCandles:
             calls.update(kwargs)
             return self._fake_download(index)
 
-        monkeypatch.setattr(data_new.yf, "download", fake)
-        df = data_new.get_candles(lookback=3)
+        monkeypatch.setattr(data.yf, "download", fake)
+        df = data.get_candles(lookback=3)
 
         assert calls["period"] == "5d"
         assert calls["interval"] == "15m"
@@ -231,11 +231,11 @@ class TestGetCandles:
         assert df.index[-1] == index[-1].tz_convert("UTC")
 
     def test_get_candles_naive_index_is_treated_as_utc(self, monkeypatch):
-        import buchbot.data as data_new
+        import buchbot.data as data
 
         index = pd.date_range("2026-11-20 10:00", periods=3, freq="15min")
-        monkeypatch.setattr(data_new.yf, "download", lambda symbol, **kw: self._fake_download(index))
-        df = data_new.get_candles(lookback=3)
+        monkeypatch.setattr(data.yf, "download", lambda symbol, **kw: self._fake_download(index))
+        df = data.get_candles(lookback=3)
 
         assert str(df.index.tz) == "UTC"
         assert df.index[0] == pd.Timestamp("2026-11-20 10:00", tz="UTC")
