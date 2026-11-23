@@ -10,8 +10,11 @@ einschließlich dieser Kerze. Simuliert wird ab der Kerze nach dem Signal.
 import argparse
 import csv
 import logging
+import math
 import sys
+import time
 from collections import Counter
+from statistics import stdev
 
 import pandas as pd
 
@@ -167,6 +170,13 @@ def run_backtest(df, config):
     return trades, funnel
 
 
+def _std_error(values):
+    """Standardfehler des Mittelwerts: Standardabweichung (n-1) geteilt durch Wurzel aus n."""
+    if len(values) < 2:
+        return None
+    return stdev(values) / math.sqrt(len(values))
+
+
 def _stats(items):
     """Zählt Trades ohne offene; Anteile und R nur aus bewerteten Trades."""
     items = [t for t in items if t["outcome"] != OUTCOME_OPEN]
@@ -178,6 +188,7 @@ def _stats(items):
         "timeout": sum(1 for t in items if t["outcome"] == OUTCOME_TIMEOUT),
         "avg_r": sum(rs) / len(rs) if rs else None,
         "sum_r": sum(rs) if rs else None,
+        "se": _std_error(rs),
     }
 
 
@@ -221,6 +232,113 @@ def render_table(rows, total, config, title):
         lines.append("")
         lines.extend(notes)
     return "\n".join(lines)
+
+
+ZONE_SCOPES = (
+    ("Haupt-Muster (candles_main)", "candles_main"),
+    ("Einzelkerzen (Hintergrund)", "candles_single"),
+)
+
+
+def _is_aligned(trade):
+    return trade["tags"].get("sr_aligned") is True
+
+
+def _is_against(trade):
+    return trade["tags"].get("sr_against") is True
+
+
+def _trend_relation(trade):
+    """'mit' bei BUY+up bzw. SELL+down, 'gegen' bei BUY+down bzw. SELL+up, sonst 'range' oder None (zu wenige Pivots)."""
+    trend = trade["tags"].get("swing_trend")
+    if trend not in ("up", "down"):
+        return trend
+    return "mit" if (trade["direction"] == "BUY") == (trend == "up") else "gegen"
+
+
+# Gruppen überlappen sich (a und c, d ist Teilmenge von a), die Anteile ergeben daher nicht 100 %
+ZONE_GROUPS = (
+    ("a) Muster an starker passender Zone", _is_aligned),
+    ("b) keine Zone in der Nähe", lambda t: t["tags"].get("sr_relation") == "none"),
+    ("c) gegen starke Zone", _is_against),
+    ("d) a) und nicht c)", lambda t: _is_aligned(t) and not _is_against(t)),
+)
+TREND_GROUPS = (
+    ("in Trendrichtung", lambda t: _trend_relation(t) == "mit"),
+    ("gegen den Trend", lambda t: _trend_relation(t) == "gegen"),
+    ("range", lambda t: _trend_relation(t) == "range"),
+)
+
+
+def _zone_population(trades, source):
+    """Alle BUY/SELL-Signale eines Musterbereichs, offene eingeschlossen (Basis der Anteile)."""
+    return [t for t in trades if t["source"] == source and t["direction"] in TRADED_DIRECTIONS]
+
+
+def _fmt_se(value):
+    return "-" if value is None else f"{value:.2f}"
+
+
+def _fmt_mean(value):
+    return "-" if value is None else f"{value:.1f}"
+
+
+def _zone_group_lines(population, groups, config):
+    header = (f"{'Gruppe':<38}{'Anzahl':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}"
+              f"{'Ø R':>8}{'SE Ø R':>8}{'Summe R':>10}")
+    lines = [header, "-" * len(header)]
+    notes = []
+    for name, predicate in groups:
+        s = _stats([t for t in population if predicate(t)])
+        evaluated = s["tp"] + s["sl"] + s["timeout"]
+        lines.append(
+            f"{name:<38}{s['n']:>8}{_pct(s['tp'], evaluated):>6}{_pct(s['sl'], evaluated):>6}"
+            f"{_pct(s['timeout'], evaluated):>10}{_fmt_r(s['avg_r']):>8}{_fmt_se(s['se']):>8}"
+            f"{_fmt_r(s['sum_r']):>10}"
+        )
+        if s["n"] < config.MIN_SIGNALS_FOR_STATS:
+            notes.append(f"  {name}: zu wenige Fälle ({s['n']} < {config.MIN_SIGNALS_FOR_STATS})")
+    return lines, notes
+
+
+def _distribution_lines(population, groups, config, scope_title):
+    """Anteil je Gruppe an allen Signalen des Bereichs und Ø starke Zonen je Signalkerze, plus Warnungen."""
+    header = f"{'Gruppe':<38}{'Anteil':>8}{'Ø starke Zonen':>16}"
+    lines = [header, "-" * len(header)]
+    warnings = []
+    total = len(population)
+    for name, predicate in groups:
+        members = [t for t in population if predicate(t)]
+        zones = [t["tags"]["sr_strong_zones"] for t in members if "sr_strong_zones" in t["tags"]]
+        mean_zones = sum(zones) / len(zones) if zones else None
+        lines.append(f"{name:<38}{_pct(len(members), total):>8}{_fmt_mean(mean_zones):>16}")
+        if total:
+            share = len(members) / total
+            if share > config.ZONE_WARN_SHARE_HIGH or share < config.ZONE_WARN_SHARE_LOW:
+                warnings.append(f"  Warnung: Zonenparameter möglicherweise unpassend "
+                                f"({scope_title}, {name}: {_pct(len(members), total)})")
+    return lines, warnings
+
+
+def render_zone_compare(trades, config, title):
+    """Zonen-Vergleich je Musterbereich: Gruppen (Zonen und Trend) mit Statistik und Verteilung."""
+    out = [title,
+           "Offene Trades fließen nicht in die Statistik ein, sind aber in den Anteilen enthalten. "
+           "Gruppen überlappen sich."]
+    for scope_title, source in ZONE_SCOPES:
+        population = _zone_population(trades, source)
+        out += ["", f"{scope_title}: {len(population)} BUY/SELL-Signale"]
+        if not population:
+            out.append("  keine BUY/SELL-Signale")
+            continue
+        zone_lines, zone_notes = _zone_group_lines(population, ZONE_GROUPS, config)
+        trend_lines, trend_notes = _zone_group_lines(population, TREND_GROUPS, config)
+        out += ["Zonen-Gruppen:"] + zone_lines + ["Trend-Gruppen:"] + trend_lines
+        out += zone_notes + trend_notes
+        dist_lines, warnings = _distribution_lines(
+            population, ZONE_GROUPS + TREND_GROUPS, config, scope_title)
+        out += ["Verteilung:"] + dist_lines + warnings
+    return "\n".join(out)
 
 
 def render_funnel(funnel, names, title):
@@ -297,6 +415,8 @@ def _print_report(df, cfg, trades, funnel):
     print()
     print(render_funnel(funnel, SINGLE_PATTERN_NAMES, "Trichter Einzelkerzen (Hintergrund)"))
     print()
+    print(render_zone_compare(trades, cfg, f"Zonen-Vergleich {cfg.DISPLAY_SYMBOL} ({cfg.MARKET})"))
+    print()
 
 
 def default_csv_path(markets=None):
@@ -307,11 +427,13 @@ def default_csv_path(markets=None):
 
 
 def main(markets=None, fetch=get_candles, csv_path=None):
-    """Backtest je Markt. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte."""
+    """Backtest je Markt, bei mehreren Märkten zusätzlich gepoolter Zonen-Vergleich. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte."""
     names = list(markets) if markets else list(default_config.MARKETS)
     status = 0
     all_trades = []
+    run_start = time.perf_counter()
     for name in names:
+        market_start = time.perf_counter()
         cfg = default_config.for_market(name)
         df = fetch(cfg.SYMBOL, cfg.INTERVAL, lookback=None, period=cfg.BACKTEST_PERIOD)
         if df is None or len(df) == 0:
@@ -325,19 +447,41 @@ def main(markets=None, fetch=get_candles, csv_path=None):
             trade["decimals"] = cfg.PRICE_DECIMALS
         all_trades.extend(trades)
         _print_report(df, cfg, trades, funnel)
+        print(f"Laufzeit {cfg.MARKET}: {time.perf_counter() - market_start:.1f} s\n")
 
+    if len(names) > 1:
+        print(render_zone_compare(all_trades, default_config,
+                                  "Zonen-Vergleich GESAMT (alle Märkte gepoolt)"))
+        print()
     path = csv_path or default_csv_path(markets)
     write_csv(all_trades, path)
     print(f"Einzelsignale: {path}")
+    print(f"Laufzeit gesamt ({len(names)} Märkte): {time.perf_counter() - run_start:.1f} s")
     return status
+
+
+def _parse_markets(value):
+    """'ALL' oder kommagetrennte Marktnamen, die in config.MARKETS stehen."""
+    if value.strip().upper() == "ALL":
+        return list(default_config.MARKETS)
+    names = [m.strip() for m in value.split(",") if m.strip()]
+    unknown = [m for m in names if m not in default_config.MARKETS]
+    if not names or unknown:
+        raise argparse.ArgumentTypeError(f"unbekannte Märkte: {', '.join(unknown) or value}")
+    return names
 
 
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Backtest der Muster je Markt")
-    parser.add_argument("--market", choices=sorted(default_config.MARKETS),
-                        help="Nur ein Markt (Standard: alle)")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--market", choices=sorted(default_config.MARKETS),
+                       help="Nur ein Markt (Standard: alle)")
+    group.add_argument("--markets", type=_parse_markets,
+                       help="ALL oder Liste, z. B. EURUSD,GBPUSD (gepoolter Zonen-Vergleich)")
     args = parser.parse_args(argv)
-    return main(markets=[args.market] if args.market else None)
+    if args.market:
+        return main(markets=[args.market])
+    return main(markets=args.markets)
 
 
 if __name__ == "__main__":

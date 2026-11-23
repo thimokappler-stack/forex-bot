@@ -182,3 +182,93 @@ def test_funnel_stages_only_shrink():
     _, funnel = backtest.find_signals(full, make_config(MAX_HOLD_CANDLES=32))
     for name in backtest.MAIN_PATTERN_NAMES + backtest.SINGLE_PATTERN_NAMES:
         assert funnel["raw"][name] >= funnel["trend"][name] >= funnel["sltp"][name]
+
+
+def make_trade(direction="BUY", source="candles_main", outcome="TP", r=1.0, aligned=None,
+               against=False, relation="none", trend="range", zones=2, market="EURUSD"):
+    tags = {"sr_aligned": aligned, "sr_against": against, "sr_relation": relation,
+            "swing_trend": trend, "sr_strong_zones": zones}
+    return {"pattern": "Test", "source": source, "direction": direction, "outcome": outcome,
+            "r": r, "tags": tags, "market": market}
+
+
+def test_zone_groups_assign_each_group_with_fixed_examples():
+    aligned_buy = make_trade("BUY", aligned=True, relation="at_support")
+    against_sell = make_trade("SELL", against=True, relation="at_resistance")
+    no_zone = make_trade("BUY", aligned=None, relation="none")
+
+    a, b, c, d = (predicate for _, predicate in backtest.ZONE_GROUPS)
+    assert a(aligned_buy) and not c(aligned_buy) and d(aligned_buy) and not b(aligned_buy)
+    assert c(against_sell) and not a(against_sell) and not d(against_sell)
+    assert b(no_zone) and not a(no_zone) and not c(no_zone) and not d(no_zone)
+
+    aligned_but_against = make_trade("BUY", aligned=True, against=True, relation="at_support")
+    assert a(aligned_but_against) and not d(aligned_but_against)
+
+
+def test_trend_groups_depend_on_direction_and_swing_trend():
+    mit, gegen, range_ = (predicate for _, predicate in backtest.TREND_GROUPS)
+    assert mit(make_trade("BUY", trend="up")) and mit(make_trade("SELL", trend="down"))
+    assert gegen(make_trade("BUY", trend="down")) and gegen(make_trade("SELL", trend="up"))
+    assert range_(make_trade("BUY", trend="range"))
+    no_pivots = make_trade("BUY", trend=None)
+    assert not (mit(no_pivots) or gegen(no_pivots) or range_(no_pivots))
+
+
+def test_standard_error_is_sample_std_over_root_n():
+    trades = [make_trade(r=r) for r in (1.0, -1.0, 2.0, 0.0)]
+    stats = backtest._stats(trades)
+    # Mittelwert 0.5, Stichprobenstandardabweichung sqrt(5/3) = 1.291, geteilt durch sqrt(4)
+    assert stats["se"] == pytest.approx(0.6455, abs=1e-4)
+
+
+def test_standard_error_is_none_for_single_trade():
+    assert backtest._stats([make_trade(r=1.0)])["se"] is None
+
+
+def test_empty_population_shows_notice_and_no_warning():
+    out = backtest.render_zone_compare([], default_config, "Test")
+    assert "keine BUY/SELL-Signale" in out
+    assert "Warnung" not in out
+
+
+def test_empty_group_is_listed_with_dashes_and_few_cases_note():
+    population = [make_trade("BUY", aligned=True, relation="at_support", trend="up")]
+    out = backtest.render_zone_compare(population, default_config, "Test")
+    row = next(line for line in out.splitlines() if line.startswith("c) gegen starke Zone"))
+    assert row[38:46].strip() == "0"
+    assert row[46:52].strip() == "-"
+    assert "c) gegen starke Zone: zu wenige Fälle (0 < 30)" in out
+
+
+def test_warning_when_one_group_takes_over_80_percent():
+    population = [make_trade("BUY", aligned=True, relation="at_support", trend="up") for _ in range(10)]
+    out = backtest.render_zone_compare(population, default_config, "Test")
+    assert "Zonenparameter möglicherweise unpassend" in out
+    assert "Haupt-Muster (candles_main)" in out
+
+
+def test_warning_when_group_is_below_5_percent():
+    population = [make_trade("BUY", aligned=True, relation="at_support", trend="up") for _ in range(10)]
+    population += [make_trade("BUY", aligned=None, relation="none", trend="up") for _ in range(20)]
+    out = backtest.render_zone_compare(population, default_config, "Test")
+    warnings = [line for line in out.splitlines() if "Warnung" in line]
+    assert any("c) gegen starke Zone" in line for line in warnings)
+
+
+def test_pooling_adds_trades_of_two_markets():
+    eurusd = [make_trade("BUY", aligned=True, relation="at_support", market="EURUSD") for _ in range(2)]
+    gbpusd = [make_trade("BUY", aligned=True, relation="at_support", market="GBPUSD") for _ in range(3)]
+    pooled = eurusd + gbpusd
+    assert len(backtest._zone_population(pooled, "candles_main")) == 5
+    assert backtest._stats([t for t in pooled if backtest._is_aligned(t)])["n"] == 5
+    out = backtest.render_zone_compare(pooled, default_config, "GESAMT")
+    row = next(line for line in out.splitlines() if line.startswith("a) Muster an starker passender Zone"))
+    assert row[38:46].strip() == "5"
+
+
+def test_parse_markets_accepts_all_and_lists_and_rejects_unknown():
+    assert backtest._parse_markets("ALL") == list(default_config.MARKETS)
+    assert backtest._parse_markets("EURUSD, GBPUSD") == ["EURUSD", "GBPUSD"]
+    with pytest.raises(Exception):
+        backtest._parse_markets("EURUSD,NOPE")

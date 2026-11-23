@@ -187,6 +187,8 @@ MAIL_DISCLAIMER = "Kein Anlagerat, nur Mustererkennung."
 # === BACKTEST ===
 MAX_HOLD_CANDLES = 32         # Max Haltedauer in Kerzen (15m: 8 Stunden, 30m: 16 Stunden), je Markt überschreibbar
 MIN_SIGNALS_FOR_STATS = 30    # Minimum Signale für belastbare Backtest-Aussage
+ZONE_WARN_SHARE_HIGH = 0.80   # Zonen-Verteilung: eine Gruppe über diesem Anteil -> Warnung
+ZONE_WARN_SHARE_LOW = 0.05    # Zonen-Verteilung: eine Gruppe unter diesem Anteil -> Warnung
 BACKTEST_PERIOD = "60d"       # Historie für den Backtest (yfinance-Maximum für 15m)
 BACKTEST_CSV_FILE = "backtest_results.csv"  # Einzelsignale, relativ zum Projektordner
 

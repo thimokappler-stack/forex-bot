@@ -141,6 +141,7 @@ def _tag(signal, zones, trend, config):
         tags["sr_zone_high"] = match.high
         tags["sr_touches"] = match.touches
         tags["sr_zone_kind"] = match.kind
+    tags["sr_strong_zones"] = len(strong)
     tags["sr_aligned"] = aligned
     tags["sr_against"] = None if signal.direction == "NEUTRAL" else against is not None
     tags["sr_room_atr"] = room

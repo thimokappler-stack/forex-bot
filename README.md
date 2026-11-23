@@ -66,7 +66,10 @@ Die Ausgabe geht in `bot.log` und zur Console. Jedes Signal wird in `state.json`
 Lädt maximal verfügbare 15m-Historie (etwa 60 Tage) und simuliert alle Trades:
 
 ```bash
-python -m buchbot.backtest
+python -m buchbot.backtest                      # alle Märkte, je Markt eine Auswertung
+python -m buchbot.backtest --market EURUSD      # nur ein Markt
+python -m buchbot.backtest --markets ALL        # alle zwölf Märkte, zusätzlich gepoolter Zonen-Vergleich
+python -m buchbot.backtest --markets EURUSD,GBPUSD
 ```
 
 Ausgabe: Tabelle mit für jedes Muster:
@@ -74,10 +77,26 @@ Ausgabe: Tabelle mit für jedes Muster:
 - Anteil TP / SL / Timeout
 - Durchschnittliches Ergebnis in R (TP = +2, SL = -1, etc.)
 
+Zusätzlich je Markt (und bei mehreren Märkten gepoolt) ein **Zonen-Vergleich** (Unterstützung und Widerstand, Kapitel 9):
+- Gruppen: a) Muster an starker passender Zone, b) keine Zone in der Nähe, c) gegen starke Zone, d) a) und nicht c)
+- Trend-Gruppen: in Trendrichtung, gegen den Trend, range
+- Je Gruppe: Anzahl, Anteil TP / SL / Timeout, Ø R, Standardfehler des Ø R, Summe R; unter 30 Trades ein Hinweis "zu wenige Fälle"
+- Verteilung: Anteil der Gruppe an allen Signalen und Ø starke Zonen je Signalkerze. Liegt eine Gruppe über 80 % oder unter 5 %, erscheint die Warnung "Zonenparameter möglicherweise unpassend" (Schwellen in `config.py`)
+
+Der Backtest verändert keine Signale. Die Zonen-Auswertung dient nur der Einschätzung.
+
 ### Tests
 
+Neuer Bot (`buchbot`):
+
 ```bash
-pytest tests/
+pytest tests_buchbot
+```
+
+Alter Bot (unverändert):
+
+```bash
+pytest tests
 # oder einzeln:
 pytest tests/test_patterns.py -v
 ```
@@ -362,6 +381,14 @@ GESAMT                        215                       10.1
 - **R:** Ergebnis in Risikoeinheiten (TP = +2, SL = −1, Timeout = proportional)
 
 ## Tests
+
+Neuer Bot (`buchbot`):
+
+```bash
+pytest tests_buchbot -v
+```
+
+Alter Bot (unverändert):
 
 ```bash
 pytest tests/ -v
