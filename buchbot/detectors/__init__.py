@@ -4,7 +4,7 @@ Detektor-Registry.
 Ein neuer Detektor = neue Datei + register(...) hier + Eintrag in DETECTORS (config.py).
 """
 
-from buchbot.detectors import candles_main
+from buchbot.detectors import candles_main, candles_single
 
 VALID_MODES = ("off", "log_only", "notify")
 
@@ -37,3 +37,4 @@ def run_detectors(df, config):
 
 
 register("candles_main", candles_main.detect, candles_main.SOURCE)
+register("candles_single", candles_single.detect, candles_single.SOURCE)

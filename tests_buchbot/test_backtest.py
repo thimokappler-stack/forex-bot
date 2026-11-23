@@ -123,7 +123,7 @@ def test_trade_whose_hold_window_exceeds_data_is_open_even_if_tp_is_touched():
 def test_open_trades_are_excluded_from_statistics():
     open_trade = {"pattern": "Morning Star", "outcome": "offen", "r": None}
     tp_trade = {"pattern": "Morning Star", "outcome": "TP", "r": 1.95}
-    rows, total = backtest.summarize([open_trade, tp_trade])
+    rows, total = backtest.summarize([open_trade, tp_trade], backtest.MAIN_PATTERN_NAMES)
     stats = dict(rows)["Morning Star"]
     assert stats["n"] == 1
     assert total["n"] == 1
@@ -132,14 +132,43 @@ def test_open_trades_are_excluded_from_statistics():
 
 
 def test_table_lists_all_patterns_even_without_signals():
-    rows, total = backtest.summarize([])
+    rows, total = backtest.summarize([], backtest.MAIN_PATTERN_NAMES)
     table = backtest.render_table(rows, total, make_config(), "info")
-    for name in backtest.PATTERN_NAMES:
+    for name in backtest.MAIN_PATTERN_NAMES:
         assert name in table
-    assert len(backtest.PATTERN_NAMES) == 10
+    assert len(backtest.MAIN_PATTERN_NAMES) == 10
     line = next(line for line in table.splitlines() if line.startswith("Steigendes Dreier-Pattern"))
     assert line.endswith("-")
     assert "0" in line
+
+
+def test_neutral_signal_is_not_simulated_and_has_no_r():
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1010, 1.1000)])
+    trade = backtest.simulate(make_signal("NEUTRAL", None, None), df, 0, make_config())
+    assert trade["outcome"] == "nicht bewertet"
+    assert trade["r"] is None
+    assert trade["exit_time"] is None
+
+
+def test_neutral_signals_are_counted_with_dashes_for_results():
+    neutral = {"pattern": "Doji", "outcome": "nicht bewertet", "r": None}
+    rows, total = backtest.summarize([neutral], backtest.SINGLE_PATTERN_NAMES)
+    stats = dict(rows)["Doji"]
+    assert stats["n"] == 1
+    assert stats["avg_r"] is None
+    assert stats["sum_r"] is None
+    table = backtest.render_table(rows, total, make_config(), "info")
+    line = next(line for line in table.splitlines() if line.startswith("Doji"))
+    assert line.split()[1:] == ["1", "-", "-", "-", "-", "-"]
+
+
+def test_summary_groups_are_separate():
+    main = {"pattern": "Morning Star", "outcome": "TP", "r": 1.0}
+    single = {"pattern": "Doji", "outcome": "nicht bewertet", "r": None}
+    _, total = backtest.summarize([main, single], backtest.MAIN_PATTERN_NAMES)
+    assert total["n"] == 1
+    _, total = backtest.summarize([main, single], backtest.SINGLE_PATTERN_NAMES)
+    assert total["n"] == 1
 
 
 def test_funnel_stages_only_shrink():
@@ -152,5 +181,5 @@ def test_funnel_stages_only_shrink():
     full = make_df(np.column_stack([open_, high, low, close]).tolist())
 
     _, funnel = backtest.find_signals(full, make_config(MAX_HOLD_CANDLES=32))
-    for name in backtest.PATTERN_NAMES:
+    for name in backtest.MAIN_PATTERN_NAMES + backtest.SINGLE_PATTERN_NAMES:
         assert funnel["raw"][name] >= funnel["trend"][name] >= funnel["sltp"][name]

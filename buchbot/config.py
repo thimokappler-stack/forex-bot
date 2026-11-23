@@ -40,9 +40,7 @@ SOLDIERS_K1_MAX_ATR = 0.5              # K1 "klein": Körper ≤ 0.5 × ATR
 # === DREIER-PATTERN (Rising/Falling) ===
 RISEFALL_REQUIRE_INSIDE_RANGE = True   # Mittlere Kerzen innerhalb Spanne K1
 
-# === EINZELKERZEN-MUSTER (Background-Analyse) ===
-SINGLE_PATTERNS_MODE = "log_only"      # "off", "log_only", "notify"
-                                        # "log_only" = keine E-Mail, nur background_signals.csv
+# === EINZELKERZEN-MUSTER (Hintergrund-Analyse, Betriebsart über DETECTORS) ===
 DOJI_BODY_RATIO = 0.10                 # Doji: Körper ≤ 10% der Kerzenspanne
 WICK_LONG_RATIO = 2.0                  # Langer Docht ≥ 2 × Körper
 WICK_SMALL_RATIO = 0.10                # Kleiner Docht ≤ 10% der Kerzenspanne
@@ -57,7 +55,7 @@ PIP_SIZE = 0.0001             # Pip-Größe bei EUR/USD
 # Betrieb je Detektor: "off", "log_only" (nur Log/CSV), "notify" (E-Mail)
 DETECTORS = {
     "candles_main": "log_only",
-    "candles_single": "off",
+    "candles_single": "log_only",
 }
 
 # === PIPELINE & MARKTZEITEN ===
@@ -65,6 +63,7 @@ DETECTORS = {
 MARKET_CLOSED_FROM = (4, 22)  # Freitag 22:00 UTC: Markt geschlossen
 MARKET_CLOSED_UNTIL = (6, 22) # Sonntag 22:00 UTC: Markt wieder offen
 STALE_MAX_MINUTES = 45        # Letzte geschlossene Kerze älter als das = "Daten veraltet"
+CLOCK_TOLERANCE_MINUTES = 2   # Toleranz für die Uhrzeit-Prüfung (Systemuhr geht nach)
 EVAL_WINDOW_CANDLES = 2       # Pro Lauf ausgewertete geschlossene Kerzen (1 = nur die letzte)
 STATE_FILE = "state_new.json" # Duplikat-Schutz, relativ zum Projektordner
 STATE_RETENTION_DAYS = 7      # Einträge im Duplikat-Schutz werden nach so vielen Tagen entfernt

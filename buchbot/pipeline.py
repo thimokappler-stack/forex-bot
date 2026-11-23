@@ -79,7 +79,7 @@ def run(at=None, now=None, config=default_config, fetch=get_candles,
         logger.error("Keine Kerzen erhalten. Lauf beendet, nächster Lauf versucht es erneut.")
         return summary
 
-    if not dry_run and pd.Timestamp(df.index[-1]) > now:
+    if not dry_run and pd.Timestamp(df.index[-1]) > now + pd.Timedelta(minutes=config.CLOCK_TOLERANCE_MINUTES):
         logger.warning(
             "Systemuhr geht nach: neueste Kerze startet %s UTC, Systemzeit ist %s UTC. Lauf ohne Auswertung beendet.",
             pd.Timestamp(df.index[-1]).isoformat(), now.isoformat(),

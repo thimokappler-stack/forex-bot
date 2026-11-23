@@ -18,7 +18,8 @@ from buchbot import config as default_config
 from buchbot import sltp
 from buchbot.data import get_candles, remove_incomplete_candle
 from buchbot.detectors import run_detectors
-from buchbot.detectors.candles_main import PATTERNS
+from buchbot.detectors.candles_main import PATTERNS as MAIN_PATTERNS
+from buchbot.detectors.candles_single import PATTERNS as SINGLE_PATTERNS
 from buchbot.filters import trend
 from buchbot.models import format_price
 from buchbot.pipeline import BASE_DIR
@@ -30,7 +31,9 @@ OUTCOME_TIMEOUT = "Zeitablauf"
 OUTCOME_OPEN = "offen"
 OUTCOME_NOT_EVALUATED = "nicht bewertet"
 EVALUATED_OUTCOMES = (OUTCOME_TP, OUTCOME_SL, OUTCOME_TIMEOUT)
-PATTERN_NAMES = [p.name for p in PATTERNS]
+MAIN_PATTERN_NAMES = [p.name for p in MAIN_PATTERNS]
+SINGLE_PATTERN_NAMES = [p.name for p in SINGLE_PATTERNS]
+TRADED_DIRECTIONS = ("BUY", "SELL")
 FUNNEL_STAGES = ("raw", "trend", "sltp")
 TRADE_STAGES = ("simuliert", "offen", "uebersprungen")
 
@@ -94,8 +97,8 @@ def _trade(signal, df, pos, exit_pos, exit_price, outcome, config):
 
 def simulate(signal, df, pos, config):
     """Simuliert den Trade ab der Kerze nach dem Signal (Signalkerze an Position `pos`)."""
-    if signal.direction not in ("BUY", "SELL"):
-        return _trade(signal, df, pos, pos, None, OUTCOME_NOT_EVALUATED, config)
+    if signal.direction not in TRADED_DIRECTIONS:
+        return _trade(signal, df, pos, None, None, OUTCOME_NOT_EVALUATED, config)
 
     end = pos + config.MAX_HOLD_CANDLES
     # Haltefenster reicht über das Datenende: nicht bewertbar, geht nicht in die Statistik ein
@@ -121,6 +124,7 @@ def simulate(signal, df, pos, config):
 def run_backtest(df, config):
     """Simuliert alle Signale. Solange für ein Muster eine Position offen ist, werden dessen Signale ignoriert.
 
+    NEUTRAL-Signale werden nur gezählt (nicht simuliert, blockieren nichts).
     Liefert (Trades, Trichter-Zähler je Stufe inklusive Simulationsstufen).
     """
     trades = []
@@ -129,6 +133,9 @@ def run_backtest(df, config):
     for stage in TRADE_STAGES:
         funnel[stage] = Counter()
     for pos, signal in found:
+        if signal.direction not in TRADED_DIRECTIONS:
+            trades.append(simulate(signal, df, pos, config))
+            continue
         if busy_until.get(signal.pattern, -1) >= pos:
             funnel["uebersprungen"][signal.pattern] += 1
             continue
@@ -142,6 +149,8 @@ def run_backtest(df, config):
 
 
 def _stats(items):
+    """Zählt Trades ohne offene; Anteile und R nur aus bewerteten Trades."""
+    items = [t for t in items if t["outcome"] != OUTCOME_OPEN]
     rs = [t["r"] for t in items if t["r"] is not None]
     return {
         "n": len(items),
@@ -149,20 +158,17 @@ def _stats(items):
         "sl": sum(1 for t in items if t["outcome"] == OUTCOME_SL),
         "timeout": sum(1 for t in items if t["outcome"] == OUTCOME_TIMEOUT),
         "avg_r": sum(rs) / len(rs) if rs else None,
-        "sum_r": sum(rs),
+        "sum_r": sum(rs) if rs else None,
     }
 
 
-def summarize(trades):
-    """Zeilen für alle Muster der Registry (auch ohne Signale) plus Gesamtzeile.
+def summarize(trades, names):
+    """Zeilen für alle Muster der Gruppe (auch ohne Signale) plus Gesamtzeile der Gruppe.
 
     Offene Trades (Haltefenster über das Datenende) fließen nicht in die Statistik ein.
     """
-    evaluated = [t for t in trades if t["outcome"] in EVALUATED_OUTCOMES]
-    rows = []
-    for name in PATTERN_NAMES:
-        rows.append((name, _stats([t for t in evaluated if t["pattern"] == name])))
-    return rows, _stats(evaluated)
+    rows = [(name, _stats([t for t in trades if t["pattern"] == name])) for name in names]
+    return rows, _stats([t for t in trades if t["pattern"] in names])
 
 
 def open_count(trades):
@@ -177,21 +183,18 @@ def _fmt_r(value):
     return "-" if value is None else f"{value:+.2f}"
 
 
-def render_table(rows, total, config, info):
-    header = f"{'Muster':<26}{'Trades':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}{'Ø R':>8}{'Summe R':>10}"
-    lines = [info, "", header, "-" * len(header)]
+def render_table(rows, total, config, title):
+    header = f"{'Muster':<26}{'Anzahl':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}{'Ø R':>8}{'Summe R':>10}"
+    lines = [title, "", header, "-" * len(header)]
     notes = []
     for name, s in rows + [("GESAMT", total)]:
         if name == "GESAMT":
             lines.append("-" * len(header))
-        if s["n"] == 0:
-            lines.append(f"{name:<26}{0:>8}{'-':>6}{'-':>6}{'-':>10}{'-':>8}{'-':>10}")
-        else:
-            evaluated = s["tp"] + s["sl"] + s["timeout"]
-            lines.append(
-                f"{name:<26}{s['n']:>8}{_pct(s['tp'], evaluated):>6}{_pct(s['sl'], evaluated):>6}"
-                f"{_pct(s['timeout'], evaluated):>10}{_fmt_r(s['avg_r']):>8}{_fmt_r(s['sum_r']):>10}"
-            )
+        evaluated = s["tp"] + s["sl"] + s["timeout"]
+        lines.append(
+            f"{name:<26}{s['n']:>8}{_pct(s['tp'], evaluated):>6}{_pct(s['sl'], evaluated):>6}"
+            f"{_pct(s['timeout'], evaluated):>10}{_fmt_r(s['avg_r']):>8}{_fmt_r(s['sum_r']):>10}"
+        )
         if name != "GESAMT" and s["n"] < config.MIN_SIGNALS_FOR_STATS:
             notes.append(f"  {name}: zu wenige Fälle für eine belastbare Aussage "
                          f"({s['n']} < {config.MIN_SIGNALS_FOR_STATS})")
@@ -201,14 +204,15 @@ def render_table(rows, total, config, info):
     return "\n".join(lines)
 
 
-def render_funnel(funnel):
+def render_funnel(funnel, names, title):
     """Trichter je Muster: Rohtreffer -> nach Trend -> nach Mindestabstand -> simuliert."""
     columns = [("Muster", 26), ("Rohtreffer", 11), ("nach Trend", 11), ("nach Abstand", 13),
                ("simuliert", 11), ("offen", 7), ("übersprung.", 12)]
-    header = "".join(f"{title:<{w}}" if i == 0 else f"{title:>{w}}" for i, (title, w) in enumerate(columns))
-    lines = ["Trichter je Muster (Kerzen mit Treffer, nicht Trades)", "", header, "-" * len(header)]
+    header = "".join(f"{title_cell:<{w}}" if i == 0 else f"{title_cell:>{w}}"
+                     for i, (title_cell, w) in enumerate(columns))
+    lines = [title, "", header, "-" * len(header)]
     totals = Counter()
-    for name in PATTERN_NAMES:
+    for name in names:
         values = [funnel["raw"][name], funnel["trend"][name], funnel["sltp"][name],
                   funnel["simuliert"][name], funnel["offen"][name], funnel["uebersprungen"][name]]
         totals.update(dict(zip(["raw", "trend", "sltp", "sim", "offen", "skip"], values)))
@@ -258,17 +262,25 @@ def main(config=default_config, fetch=get_candles):
     df = remove_incomplete_candle(df, config.INTERVAL)
 
     trades, funnel = run_backtest(df, config)
-    rows, total = summarize(trades)
+    main_rows, main_total = summarize(trades, MAIN_PATTERN_NAMES)
+    single_rows, single_total = summarize(trades, SINGLE_PATTERN_NAMES)
     evaluated_candles = len(range(first_position(config), len(df) - 1))
     info = (
         f"Zeitraum: {df.index[0].isoformat()} bis {df.index[-1].isoformat()} (UTC)\n"
         f"Kerzen geladen: {len(df)}, davon ausgewertet: {evaluated_candles} "
         f"(Warmlauf {first_position(config)})"
     )
-    print(render_table(rows, total, config, info))
+    print(info)
+    print()
+    print(render_table(main_rows, main_total, config, "Haupt-Muster"))
+    print()
+    print(render_table(single_rows, single_total, config,
+                       "Einzelkerzen (Hintergrund, NEUTRAL nur gezählt, nicht bewertet)"))
     print(f"\noffen: {open_count(trades)} (Haltefenster reicht über das Datenende, nicht in der Statistik)")
     print()
-    print(render_funnel(funnel))
+    print(render_funnel(funnel, MAIN_PATTERN_NAMES, "Trichter Haupt-Muster (Kerzen mit Treffer, nicht Trades)"))
+    print()
+    print(render_funnel(funnel, SINGLE_PATTERN_NAMES, "Trichter Einzelkerzen (Hintergrund)"))
 
     path = BASE_DIR / config.BACKTEST_CSV_FILE
     write_csv(trades, path)

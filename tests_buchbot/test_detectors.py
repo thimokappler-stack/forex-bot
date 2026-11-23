@@ -224,7 +224,7 @@ class TestRegistry:
         assert all(s.mode == "log_only" for s in signals)
 
     def test_dummy_detectors_do_not_leak_into_real_registry(self):
-        assert set(detectors._REGISTRY) == {"candles_main"}
+        assert set(detectors._REGISTRY) == {"candles_main", "candles_single"}
 
 
 if __name__ == "__main__":

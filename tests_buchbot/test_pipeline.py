@@ -202,6 +202,23 @@ def test_systemuhr_korrekt_keine_warnung(registry, paths, caplog):
     assert "Systemuhr geht nach" not in caplog.text
 
 
+def test_systemuhr_innerhalb_toleranz_keine_warnung(registry, paths, caplog):
+    fetch = fake_fetch(make_candles())  # neueste Kerze startet 09:45, Systemzeit 09:43 -> 2 Minuten Abweichung
+    now = pd.Timestamp("2026-05-06 09:43", tz="UTC")
+    with caplog.at_level(logging.WARNING):
+        pipeline.run(now=now, config=make_config(), fetch=fetch, **paths)
+    assert "Systemuhr geht nach" not in caplog.text
+
+
+def test_systemuhr_ueber_toleranz_warnt(registry, paths, caplog):
+    fetch = fake_fetch(make_candles())  # neueste Kerze startet 09:45, Systemzeit 09:42 -> 3 Minuten Abweichung
+    now = pd.Timestamp("2026-05-06 09:42", tz="UTC")
+    with caplog.at_level(logging.WARNING):
+        summary = pipeline.run(now=now, config=make_config(), fetch=fetch, **paths)
+    assert summary["signals"] == 0
+    assert "Systemuhr geht nach" in caplog.text
+
+
 def test_probelauf_mit_at_ist_von_uhrpruefung_ausgenommen(registry, paths, caplog):
     fetch = fake_fetch(make_candles())  # Kerzen nach --at werden entfernt, Systemuhr irrelevant
     with caplog.at_level(logging.WARNING):
