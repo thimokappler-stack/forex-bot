@@ -48,6 +48,51 @@ MARKETS = {
         "price_decimals": 5, "detectors": None,
         "interval": "30m", "observe_only": True,
     },
+    # Beobachtungsmärkte: nur Auswertung und CSV, nie Mail (nicht in BUCH_NOTIFY_MARKETS genannt).
+    # Mindestabstand und Spread sind Startwerte und in dieser Datei änderbar.
+    "USDJPY": {
+        "display": "USD/JPY", "symbol": "USDJPY=X", "hours": "forex",
+        "pip_size": 0.01, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.0,
+        "tweezer_tolerance": 0.015, "tweezer_atr_fraction": None,
+        "price_decimals": 3, "detectors": None, "observe_only": True,
+    },
+    "AUDUSD": {
+        "display": "AUD/USD", "symbol": "AUDUSD=X", "hours": "forex",
+        "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.0,
+        "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
+        "price_decimals": 5, "detectors": None, "observe_only": True,
+    },
+    "GBPJPY": {
+        "display": "GBP/JPY", "symbol": "GBPJPY=X", "hours": "forex",
+        "pip_size": 0.01, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 2.0,
+        "tweezer_tolerance": 0.015, "tweezer_atr_fraction": None,
+        "price_decimals": 3, "detectors": None, "observe_only": True,
+    },
+    "USDCAD": {
+        "display": "USD/CAD", "symbol": "USDCAD=X", "hours": "forex",
+        "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.5,
+        "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
+        "price_decimals": 5, "detectors": None, "observe_only": True,
+    },
+    "USDCHF": {
+        "display": "USD/CHF", "symbol": "USDCHF=X", "hours": "forex",
+        "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.5,
+        "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
+        "price_decimals": 5, "detectors": None, "observe_only": True,
+    },
+    "EURJPY": {
+        "display": "EUR/JPY", "symbol": "EURJPY=X", "hours": "forex",
+        "pip_size": 0.01, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.5,
+        "tweezer_tolerance": 0.015, "tweezer_atr_fraction": None,
+        "price_decimals": 3, "detectors": None, "observe_only": True,
+    },
+    # Gold als Future (GC=F): XAUUSD=X liefert bei yfinance keine Daten.
+    "GOLD": {
+        "display": "Gold", "symbol": "GC=F", "hours": "futures_gold",
+        "pip_size": 1.0, "risk_unit": "USD", "min_sl_pips": 2, "spread_pips": 0.5,
+        "tweezer_tolerance": None, "tweezer_atr_fraction": 0.15,
+        "price_decimals": 2, "detectors": None, "observe_only": True,
+    },
 }
 DEFAULT_MARKET = "EURUSD"
 # "interval" je Markt in MARKETS, fehlt er, gilt INTERVAL. "observe_only": nie Mail, Detektoren nur log_only.
@@ -56,6 +101,8 @@ DEFAULT_MARKET = "EURUSD"
 INTERVAL = "15m"              # Kerzenlänge (Standard, je Markt überschreibbar)
 INTERVAL_MINUTES = {"15m": 15, "30m": 30}
 LOOKBACK_CANDLES = 100        # Anzahl geholter Kerzen
+MARKET_PAUSE_SECONDS = 1      # Pause zwischen zwei Märkten (schont yfinance bei vielen Abrufen)
+FETCH_RETRY_SECONDS = 5       # Wartezeit vor einem einzigen Wiederholungsversuch bei leerer Antwort oder Fehler
 
 # === TRENDFILTER ===
 TREND_EMA_PERIOD = 50         # EMA-Periode für Trend-Filter
@@ -104,6 +151,8 @@ DETECTORS = {
 # Überschreibbar per .env: BUCH_DETECTOR_MODES="candles_main=notify,candles_single=log_only"
 
 # === PIPELINE & MARKTZEITEN ===
+# Handelszeiten je Markt ("hours"): "forex" (Marktzeiten unten, UTC), "24_7", "futures_gold"
+# (Fr 17:00 bis So 18:00 und Mo-Do 17:00-18:00 New Yorker Zeit, Feiertage nicht berücksichtigt).
 # Marktzeiten als (Wochentag, Stunde UTC); Montag = 0, Sonntag = 6
 MARKET_CLOSED_FROM = (4, 22)  # Freitag 22:00 UTC: Markt geschlossen
 MARKET_CLOSED_UNTIL = (6, 22) # Sonntag 22:00 UTC: Markt wieder offen

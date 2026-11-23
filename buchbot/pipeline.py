@@ -9,7 +9,9 @@ Mail noch CSV-Eintrag noch Änderung am Duplikat-Schutz.
 
 import logging
 import os
+import time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -35,14 +37,52 @@ def _minute_of_week(day_hour):
 
 
 def is_market_open(now, config):
-    """Forex ist von MARKET_CLOSED_FROM bis MARKET_CLOSED_UNTIL (UTC) geschlossen. "24_7" hat keine Pause."""
-    if getattr(config, "HOURS", "forex") == "24_7":
+    """Forex ist von MARKET_CLOSED_FROM bis MARKET_CLOSED_UNTIL (UTC) geschlossen. "24_7" hat keine Pause.
+    "futures_gold" ist nach New Yorker Zeit geschlossen (Sommer- und Winterzeit über zoneinfo)."""
+    hours = getattr(config, "HOURS", "forex")
+    if hours == "24_7":
         return True
     now = to_utc(now)
+    if hours == "futures_gold":
+        return _gold_open(now)
     minute_of_week = now.weekday() * 1440 + now.hour * 60 + now.minute
     closed_from = _minute_of_week(config.MARKET_CLOSED_FROM)
     closed_until = _minute_of_week(config.MARKET_CLOSED_UNTIL)
     return not (closed_from <= minute_of_week < closed_until)
+
+
+def _gold_open(now_utc):
+    ny = now_utc.tz_convert(ZoneInfo("America/New_York"))
+    minute = ny.hour * 60 + ny.minute
+    weekday = ny.weekday()
+    if weekday == 5:                       # Samstag
+        return False
+    if weekday == 6:                       # Sonntag: offen ab 18:00
+        return minute >= 18 * 60
+    if weekday == 4:                       # Freitag: geschlossen ab 17:00
+        return minute < 17 * 60
+    return not (17 * 60 <= minute < 18 * 60)  # Montag bis Donnerstag: tägliche Pause 17:00-18:00
+
+
+def fetch_candles(fetch, config):
+    """Holt Kerzen. Bei leerer Antwort oder Fehler genau ein Wiederholungsversuch nach FETCH_RETRY_SECONDS."""
+    for attempt in range(2):
+        if attempt:
+            time.sleep(config.FETCH_RETRY_SECONDS)
+        try:
+            df = fetch(config.SYMBOL, config.INTERVAL, config.LOOKBACK_CANDLES)
+        except Exception as exc:
+            if attempt == 1:
+                raise
+            logger.warning("[%s] Abruf fehlgeschlagen (%s), Wiederholung in %s Sekunden",
+                           config.MARKET, exc, config.FETCH_RETRY_SECONDS)
+            continue
+        if df is not None and len(df) > 0:
+            return df
+        if attempt == 0:
+            logger.warning("[%s] Leere Antwort, Wiederholung in %s Sekunden",
+                           config.MARKET, config.FETCH_RETRY_SECONDS)
+    return df
 
 
 def detect_window(df, config):
@@ -70,10 +110,10 @@ def run_market(config, now, dry_run, fetch=get_candles, state_path=None, csv_pat
                     config.MARKET)
 
     if not is_market_open(now, config):
-        logger.info("Forex-Wochenende, Markt geschlossen. Lauf beendet (%s UTC)", now.isoformat())
+        logger.info("[%s] Markt geschlossen, Lauf beendet (%s UTC)", config.MARKET, now.isoformat())
         return summary
 
-    df = fetch(config.SYMBOL, config.INTERVAL, config.LOOKBACK_CANDLES)
+    df = fetch_candles(fetch, config)
     if df is None or len(df) == 0:
         logger.error("Keine Kerzen erhalten. Lauf beendet, nächster Lauf versucht es erneut.")
         return summary
@@ -163,7 +203,9 @@ def run(at=None, now=None, fetch=get_candles, state_path=None, csv_path=None,
     settings = settings if settings is not None else read_settings(os.environ)
     names = markets or list(MARKETS)
     results = {}
-    for name in names:
+    for index, name in enumerate(names):
+        if index:
+            time.sleep(default_config.MARKET_PAUSE_SECONDS)
         config = default_config.for_market(name, settings)
         try:
             results[name] = run_market(config, now, dry_run, fetch, state_path, csv_path)

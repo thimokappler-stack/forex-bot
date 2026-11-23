@@ -208,6 +208,29 @@ python -m buchbot.evaluate [--csv signals_log.csv] [--market GBPUSD] [--allow-ov
 
 Für Krypto ist die Risikoeinheit USD statt Pips, und die Preise werden auf 2 Nachkommastellen gerundet. Der yfinance-Zeitraum bleibt bei `60d`, da 15m-Daten nicht länger verfügbar sind.
 
+### Beobachtungsmärkte
+
+Diese Märkte werden ausgewertet, geloggt und in `signals_log.csv` geschrieben, sie senden aber **nie** eine Mail, auch nicht bei `BUCH_NOTIFY_ENABLED=1`. Sie stehen nicht in `BUCH_NOTIFY_MARKETS`, und das bleibt der Standard.
+
+| Markt-Schlüssel | Anzeige | yfinance-Symbol | Intervall | Handelszeiten |
+|---|---|---|---|---|
+| `EURUSD_30M` | EUR/USD (30m) | `EURUSD=X` | 30m | Forex |
+| `USDJPY` | USD/JPY | `USDJPY=X` | 15m | Forex |
+| `AUDUSD` | AUD/USD | `AUDUSD=X` | 15m | Forex |
+| `GBPJPY` | GBP/JPY | `GBPJPY=X` | 15m | Forex |
+| `USDCAD` | USD/CAD | `USDCAD=X` | 15m | Forex |
+| `USDCHF` | USD/CHF | `USDCHF=X` | 15m | Forex |
+| `EURJPY` | EUR/JPY | `EURJPY=X` | 15m | Forex |
+| `GOLD` | Gold | `GC=F` | 15m | Futures (siehe unten) |
+
+- Gold nutzt `GC=F` (Future). Das Spot-Symbol `XAUUSD=X` liefert bei yfinance keine Daten.
+- Gold ist Freitag 17:00 bis Sonntag 18:00 New Yorker Zeit geschlossen, außerdem täglich Montag bis Donnerstag 17:00 bis 18:00 New Yorker Zeit. Feiertage sind nicht berücksichtigt.
+- Yen-Paare haben Pip 0.01, die übrigen Forex-Paare 0.0001. Gold rechnet in USD.
+- Die Startwerte für Mindestabstand und Spread stehen in `config.py` und sind Annahmen.
+- Einen Beobachtungsmarkt später per Mail freischalten: Markt-Schlüssel in `BUCH_NOTIFY_MARKETS` eintragen, zum Beispiel `BUCH_NOTIFY_MARKETS=EURUSD,USDJPY`, und `BUCH_NOTIFY_ENABLED=1` setzen. Für `EURUSD_30M` hat das keine Wirkung, dieser Markt sendet nie Mails.
+
+Abrufe laufen mit einer Pause von `MARKET_PAUSE_SECONDS` (1 s) zwischen den Märkten. Schlägt ein Abruf fehl oder liefert er eine leere Antwort, wird nach `FETCH_RETRY_SECONDS` (5 s) einmal wiederholt.
+
 ### Umstellung vom alten auf den neuen Bot
 
 Der alte Bot (`main.py`, `main_gbpusd.py`, `main_btc.py`, `main_eth.py`) bleibt im Repository unverändert und läuft weiter, bis man umstellt. Empfohlene Reihenfolge:

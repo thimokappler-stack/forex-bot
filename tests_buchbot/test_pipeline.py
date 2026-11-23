@@ -245,7 +245,7 @@ def test_wochenende_wertet_nichts_aus_und_loggt(registry, paths, caplog):
                                config=make_config(), fetch=fetch, **paths)
     assert fetch.calls == []
     assert summary["signals"] == 0
-    assert "Wochenende" in caplog.text
+    assert "Markt geschlossen" in caplog.text
 
 
 def test_veraltete_daten_werden_gemeldet_und_nicht_ausgewertet(registry, paths, caplog):
