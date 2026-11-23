@@ -5,7 +5,7 @@ import pytest
 
 from buchbot.models import Signal
 from buchbot.swings import HIGH, LOW, Swing
-from buchbot.zones import RESISTANCE, SUPPORT, annotate, build_zones, swing_trend
+from buchbot.zones import RESISTANCE, SUPPORT, Zone, annotate, build_zones, limit_per_side, swing_trend
 
 
 CONFIG = SimpleNamespace(
@@ -16,6 +16,7 @@ CONFIG = SimpleNamespace(
     SR_MIN_ZONE_WIDTH_ATR=0.25,
     SR_MIN_TOUCHES=3,
     SR_PROXIMITY_ATR=0.5,
+    SR_MAX_ZONES_PER_SIDE=None,
     INTERVAL="15m",
 )
 
@@ -184,3 +185,47 @@ def test_sr_deaktiviert_setzt_keine_tags():
     disabled = SimpleNamespace(**{**vars(CONFIG), "SR_ENABLED": False})
     (out,) = annotate([signal], df, disabled)
     assert "sr_relation" not in out.tags
+
+
+def zone(mid, touches, kind=SUPPORT, width=0.1):
+    return Zone(mid - width / 2, mid + width / 2, touches, kind, touches >= 3)
+
+
+def test_limit_none_laesst_alle_zonen_unveraendert():
+    zones = [zone(1.0, 3), zone(1.3, 4, RESISTANCE)]
+    assert limit_per_side(zones, 1.1, None) is zones
+
+
+def test_limit_behaelt_je_seite_die_meisten_beruehrungen():
+    supports = [zone(1.00, 3), zone(0.80, 5), zone(0.50, 4)]
+    resistances = [zone(1.30, 3, RESISTANCE), zone(1.50, 4, RESISTANCE)]
+    kept = limit_per_side(supports + resistances, 1.1, 2)
+    assert sorted(z.touches for z in kept if z.kind == SUPPORT) == [4, 5]
+    assert sorted(z.touches for z in kept if z.kind == RESISTANCE) == [3, 4]
+
+
+def test_limit_gleichstand_nimmt_die_dem_einstieg_naehere_zone():
+    near = zone(1.08, 3)
+    far = zone(1.00, 3)
+    farthest = zone(0.50, 3)
+    kept = limit_per_side([far, near, farthest], 1.10, 1)
+    assert len(kept) == 1
+    assert (kept[0].low + kept[0].high) / 2 == pytest.approx(1.08)
+
+
+def test_limit_mit_weniger_starken_zonen_als_n_behaelt_alle_starken():
+    kept = limit_per_side([zone(1.0, 3), zone(1.2, 2)], 1.1, 3)
+    assert [(z.touches, z.strong) for z in kept] == [(3, True)]
+
+
+def test_annotate_tags_kommen_nur_aus_behaltenen_zonen():
+    df = df_support_and_resistance()
+    signal = make_signal(df, "BUY", entry=1.12, pattern_low=1.08)
+    (with_zones,) = annotate([signal], df, CONFIG)
+    assert with_zones.tags["sr_relation"] == "at_support"
+
+    none_kept = SimpleNamespace(**{**vars(CONFIG), "SR_MAX_ZONES_PER_SIDE": 0})
+    (without_zones,) = annotate([make_signal(df, "BUY", entry=1.12, pattern_low=1.08)], df, none_kept)
+    assert without_zones.tags["sr_relation"] == "none"
+    assert without_zones.tags["sr_aligned"] is False
+    assert without_zones.tags["sr_zone_low"] is None

@@ -320,8 +320,50 @@ def _distribution_lines(population, groups, config, scope_title):
     return lines, warnings
 
 
-def render_zone_compare(trades, config, title):
-    """Zonen-Vergleich je Musterbereich: Gruppen (Zonen und Trend) mit Statistik und Verteilung."""
+def _mean_zones_per_side(population):
+    """Ø starke Zonen je Kerze: (Unterstützung, Widerstand, Mittel beider Seiten); None ohne Tags."""
+    tagged = [t["tags"] for t in population if "sr_strong_support" in t["tags"]]
+    if not tagged:
+        return None
+    support = sum(tags["sr_strong_support"] for tags in tagged) / len(tagged)
+    resistance = sum(tags["sr_strong_resistance"] for tags in tagged) / len(tagged)
+    return support, resistance, (support + resistance) / 2
+
+
+def _header_lines(population, config, scope_title):
+    """Zusatzzeilen im Kopf: Ø Zonen je Seite und Anteil der Gruppen a und c, dazu Warnung bei zu dichten Zonen."""
+    lines, warnings = [], []
+    means = _mean_zones_per_side(population)
+    if means is not None:
+        support, resistance, per_side = means
+        lines.append(f"Ø starke Zonen je Kerze und Seite: {per_side:.1f} "
+                     f"(Unterstützung {support:.1f}, Widerstand {resistance:.1f})")
+        if per_side > config.SR_WARN_MAX_ZONES:
+            warnings.append(f"  Warnung: Zonen zu dicht ({scope_title}: Ø {per_side:.1f} je Seite, "
+                            f"Grenze {config.SR_WARN_MAX_ZONES})")
+    total = len(population)
+    lines.append(f"Anteil Gruppe a) {_pct(sum(1 for t in population if _is_aligned(t)), total)}, "
+                 f"Gruppe c) {_pct(sum(1 for t in population if _is_against(t)), total)}")
+    return lines, warnings
+
+
+def _zone_tables(population, config):
+    zone_lines, zone_notes = _zone_group_lines(population, ZONE_GROUPS, config)
+    trend_lines, trend_notes = _zone_group_lines(population, TREND_GROUPS, config)
+    return ["Zonen-Gruppen:"] + zone_lines + ["Trend-Gruppen:"] + trend_lines + zone_notes + trend_notes
+
+
+def signal_time_median(trades):
+    """Median der Signalzeiten aller BUY/SELL-Trades (oberer Wert bei gerader Anzahl); None ohne Trades."""
+    times = sorted(t["signal_time"] for t in trades if t["direction"] in TRADED_DIRECTIONS)
+    return times[len(times) // 2] if times else None
+
+
+def render_zone_compare(trades, config, title, split_at=None):
+    """Zonen-Vergleich je Musterbereich: Gruppen (Zonen und Trend) mit Statistik und Verteilung.
+
+    split_at: optionaler Zeitpunkt; dann zusätzlich Tabellen für Signale davor und danach.
+    """
     out = [title,
            "Offene Trades fließen nicht in die Statistik ein, sind aber in den Anteilen enthalten. "
            "Gruppen überlappen sich."]
@@ -331,13 +373,20 @@ def render_zone_compare(trades, config, title):
         if not population:
             out.append("  keine BUY/SELL-Signale")
             continue
-        zone_lines, zone_notes = _zone_group_lines(population, ZONE_GROUPS, config)
-        trend_lines, trend_notes = _zone_group_lines(population, TREND_GROUPS, config)
-        out += ["Zonen-Gruppen:"] + zone_lines + ["Trend-Gruppen:"] + trend_lines
-        out += zone_notes + trend_notes
+        header, header_warnings = _header_lines(population, config, scope_title)
+        out += header
+        out += _zone_tables(population, config)
         dist_lines, warnings = _distribution_lines(
             population, ZONE_GROUPS + TREND_GROUPS, config, scope_title)
-        out += ["Verteilung:"] + dist_lines + warnings
+        out += ["Verteilung:"] + dist_lines + header_warnings + warnings
+        if split_at is not None:
+            early = [t for t in population if t["signal_time"] < split_at]
+            late = [t for t in population if t["signal_time"] >= split_at]
+            cut = f"{split_at:%Y-%m-%d %H:%M} UTC"
+            out += [f"Zeithälfte 1 (Signale vor {cut}): {len(early)} BUY/SELL-Signale"]
+            out += _zone_tables(early, config)
+            out += [f"Zeithälfte 2 (Signale ab {cut}): {len(late)} BUY/SELL-Signale"]
+            out += _zone_tables(late, config)
     return "\n".join(out)
 
 
@@ -426,15 +475,21 @@ def default_csv_path(markets=None):
     return BASE_DIR / default_config.BACKTEST_CSV_FILE
 
 
-def main(markets=None, fetch=get_candles, csv_path=None):
-    """Backtest je Markt, bei mehreren Märkten zusätzlich gepoolter Zonen-Vergleich. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte."""
+def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None):
+    """Backtest je Markt, bei mehreren Märkten zusätzlich gepoolter Zonen-Vergleich mit Zeithälften. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte.
+
+    sr_max_zones überschreibt SR_MAX_ZONES_PER_SIDE aus config.py (None = Standardwert aus config.py).
+    """
     names = list(markets) if markets else list(default_config.MARKETS)
+    max_zones = default_config.SR_MAX_ZONES_PER_SIDE if sr_max_zones is None else sr_max_zones
+    print(f"Starke Zonen je Seite: {'alle' if max_zones is None else max_zones}\n")
     status = 0
     all_trades = []
     run_start = time.perf_counter()
     for name in names:
         market_start = time.perf_counter()
         cfg = default_config.for_market(name)
+        cfg.SR_MAX_ZONES_PER_SIDE = max_zones
         df = fetch(cfg.SYMBOL, cfg.INTERVAL, lookback=None, period=cfg.BACKTEST_PERIOD)
         if df is None or len(df) == 0:
             print(f"[{cfg.MARKET}] Keine Kerzen erhalten, Backtest für diesen Markt übersprungen.\n")
@@ -451,7 +506,8 @@ def main(markets=None, fetch=get_candles, csv_path=None):
 
     if len(names) > 1:
         print(render_zone_compare(all_trades, default_config,
-                                  "Zonen-Vergleich GESAMT (alle Märkte gepoolt)"))
+                                  "Zonen-Vergleich GESAMT (alle Märkte gepoolt)",
+                                  split_at=signal_time_median(all_trades)))
         print()
     path = csv_path or default_csv_path(markets)
     write_csv(all_trades, path)
@@ -471,6 +527,16 @@ def _parse_markets(value):
     return names
 
 
+def _parse_max_zones(value):
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"keine ganze Zahl: {value}")
+    if number < 1:
+        raise argparse.ArgumentTypeError("muss mindestens 1 sein")
+    return number
+
+
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Backtest der Muster je Markt")
     group = parser.add_mutually_exclusive_group()
@@ -478,10 +544,12 @@ def cli(argv=None):
                        help="Nur ein Markt (Standard: alle)")
     group.add_argument("--markets", type=_parse_markets,
                        help="ALL oder Liste, z. B. EURUSD,GBPUSD (gepoolter Zonen-Vergleich)")
+    parser.add_argument("--sr-max-zones", type=_parse_max_zones, default=None,
+                        help="Je Seite nur die N starken Zonen mit den meisten Berührungen (überschreibt SR_MAX_ZONES_PER_SIDE)")
     args = parser.parse_args(argv)
     if args.market:
-        return main(markets=[args.market])
-    return main(markets=args.markets)
+        return main(markets=[args.market], sr_max_zones=args.sr_max_zones)
+    return main(markets=args.markets, sr_max_zones=args.sr_max_zones)
 
 
 if __name__ == "__main__":

@@ -120,7 +120,9 @@ SR_ZONE_WIDTH_ATR = 0.5       # Pivots mit Abstand > 0.5 × ATR zum Clusteranfan
 SR_MIN_ZONE_WIDTH_ATR = 0.25  # Mindestbreite einer Zone (um die Mitte zentriert)
 SR_MIN_TOUCHES = 3            # Ab so vielen Pivots gilt eine Zone als stark
 SR_PROXIMITY_ATR = 0.5        # Nähe zur Zone in ATR (beidseitig erweitert, auch für sr_against)
-SR_IN_MAIL = True             # Zonen-Zeilen in die Mail
+SR_IN_MAIL = True             # Zonen-Zeilen in die Mail; Überschreibung per .env: BUCH_SR_IN_MAIL
+SR_MAX_ZONES_PER_SIDE = None  # None = alle starken Zonen; N = je Seite nur die N mit den meisten Berührungen
+SR_WARN_MAX_ZONES = 4         # Backtest: Ø starke Zonen je Kerze und Seite über diesem Wert -> Warnung
 SR_FETCH_PERIOD = "14d"       # yfinance-Periode, damit SR_LOOKBACK_CANDLES + SWING_N Kerzen reichen
 
 # === KERZENGRÖSSEN (relativ zu ATR) ===
@@ -218,20 +220,23 @@ def _parse_markets(raw, variable):
     return tuple(names)
 
 
+def _parse_bool(environ, variable, default):
+    raw = environ.get(variable, "").strip().lower()
+    if raw == "":
+        return default
+    if raw in ("1", "true", "yes"):
+        return True
+    if raw in ("0", "false", "no"):
+        return False
+    raise SettingsError(
+        f"{variable}: ungültiger Wert '{raw}' (erlaubt: 1, true, yes, 0, false, no)"
+    )
+
+
 def read_settings(environ):
-    """Liest BUCH_NOTIFY_ENABLED, BUCH_NOTIFY_MARKETS, BUCH_OBSERVE_ONLY_MARKETS und BUCH_DETECTOR_MODES."""
-    enabled_raw = environ.get("BUCH_NOTIFY_ENABLED", "").strip().lower()
-    if enabled_raw == "":
-        notify_enabled = NOTIFY_ENABLED
-    elif enabled_raw in ("1", "true", "yes"):
-        notify_enabled = True
-    elif enabled_raw in ("0", "false", "no"):
-        notify_enabled = False
-    else:
-        raise SettingsError(
-            f"BUCH_NOTIFY_ENABLED: ungültiger Wert '{enabled_raw}' "
-            "(erlaubt: 1, true, yes, 0, false, no)"
-        )
+    """Liest BUCH_NOTIFY_ENABLED, BUCH_SR_IN_MAIL, BUCH_NOTIFY_MARKETS, BUCH_OBSERVE_ONLY_MARKETS und BUCH_DETECTOR_MODES."""
+    notify_enabled = _parse_bool(environ, "BUCH_NOTIFY_ENABLED", NOTIFY_ENABLED)
+    sr_in_mail = _parse_bool(environ, "BUCH_SR_IN_MAIL", SR_IN_MAIL)
 
     notify_markets = _parse_markets(environ.get("BUCH_NOTIFY_MARKETS", ""), "BUCH_NOTIFY_MARKETS")
     if "BUCH_OBSERVE_ONLY_MARKETS" in environ:
@@ -267,6 +272,7 @@ def read_settings(environ):
 
     return {
         "notify_enabled": notify_enabled,
+        "sr_in_mail": sr_in_mail,
         "notify_markets": notify_markets,
         "observe_only_markets": observe_markets,
         "detector_modes": detector_modes,
@@ -307,6 +313,7 @@ def for_market(name, settings=None):
     cfg.DETECTORS = {**DETECTORS, **(market["detectors"] or {}), **settings["detector_modes"]}
     if cfg.OBSERVE_ONLY:
         cfg.DETECTORS = {key: ("off" if mode == "off" else "log_only") for key, mode in cfg.DETECTORS.items()}
+    cfg.SR_IN_MAIL = settings["sr_in_mail"]
     cfg.NOTIFY_IGNORED = cfg.OBSERVE_ONLY and name in settings["notify_markets"]
     cfg.NOTIFY_ENABLED = (settings["notify_enabled"] and name in settings["notify_markets"]
                           and not cfg.OBSERVE_ONLY)

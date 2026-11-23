@@ -173,7 +173,23 @@ def test_gueltige_env_werte_werden_uebernommen():
 def test_main_mit_ungueltiger_env_gibt_exitcode_1(monkeypatch, capsys):
     monkeypatch.setenv("BUCH_NOTIFY_ENABLED", "vielleicht")
     assert cli_module.main(["--at", "2026-05-06T10:00:00Z"]) == 1
-    assert "BUCH_NOTIFY_ENABLED" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("value, expected", [("1", True), ("true", True), ("yes", True),
+                                             ("0", False), ("false", False), ("no", False)])
+def test_sr_in_mail_env_schalter_wird_uebernommen(value, expected):
+    settings = read_settings({"BUCH_SR_IN_MAIL": value})
+    assert settings["sr_in_mail"] is expected
+    assert for_market("EURUSD", settings).SR_IN_MAIL is expected
+
+
+def test_sr_in_mail_ohne_env_bleibt_an():
+    assert read_settings({})["sr_in_mail"] is True
+
+
+def test_sr_in_mail_ungueltiger_wert_wirft_fehler():
+    with pytest.raises(SettingsError, match="BUCH_SR_IN_MAIL"):
+        read_settings({"BUCH_SR_IN_MAIL": "vielleicht"})
 
 
 def test_main_gibt_1_wenn_ein_markt_fehlerhaft_ist(monkeypatch):

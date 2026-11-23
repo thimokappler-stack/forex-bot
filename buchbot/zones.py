@@ -52,6 +52,21 @@ def build_zones(pivots, atr, entry, config):
     return zones
 
 
+def limit_per_side(zones, entry, max_per_side):
+    """Je Seite nur die max_per_side starken Zonen mit den meisten Berührungen; bei Gleichstand die dem Einstieg nähere.
+
+    None = alle Zonen unverändert.
+    """
+    if max_per_side is None:
+        return zones
+    kept = []
+    for kind in (SUPPORT, RESISTANCE):
+        side = [z for z in zones if z.strong and z.kind == kind]
+        side.sort(key=lambda z: (-z.touches, abs((z.low + z.high) / 2 - entry)))
+        kept.extend(side[:max_per_side])
+    return kept
+
+
 def swing_trend(pivots):
     """"up", "down", "range" oder None (zu wenige Pivots)."""
     highs = [s.price for s in pivots if s.kind == HIGH]
@@ -142,6 +157,8 @@ def _tag(signal, zones, trend, config):
         tags["sr_touches"] = match.touches
         tags["sr_zone_kind"] = match.kind
     tags["sr_strong_zones"] = len(strong)
+    tags["sr_strong_support"] = sum(1 for z in strong if z.kind == SUPPORT)
+    tags["sr_strong_resistance"] = sum(1 for z in strong if z.kind == RESISTANCE)
     tags["sr_aligned"] = aligned
     tags["sr_against"] = None if signal.direction == "NEUTRAL" else against is not None
     tags["sr_room_atr"] = room
@@ -155,6 +172,7 @@ def annotate(signals, df, config):
         pos = df.index.get_loc(signal.time - pd.Timedelta(config.INTERVAL))
         window = df.iloc[:pos + 1].iloc[-config.SR_LOOKBACK_CANDLES:]
         pivots = find_swings(window, config.SWING_N)
-        zones = build_zones(pivots, signal.atr, signal.entry, config)
+        zones = limit_per_side(build_zones(pivots, signal.atr, signal.entry, config),
+                               signal.entry, config.SR_MAX_ZONES_PER_SIDE)
         _tag(signal, zones, swing_trend(pivots), config)
     return signals

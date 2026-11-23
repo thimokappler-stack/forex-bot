@@ -70,6 +70,7 @@ python -m buchbot.backtest                      # alle Märkte, je Markt eine Au
 python -m buchbot.backtest --market EURUSD      # nur ein Markt
 python -m buchbot.backtest --markets ALL        # alle zwölf Märkte, zusätzlich gepoolter Zonen-Vergleich
 python -m buchbot.backtest --markets EURUSD,GBPUSD
+python -m buchbot.backtest --markets ALL --sr-max-zones 3   # nur für den Vergleich: je Seite die 3 stärksten Zonen
 ```
 
 Ausgabe: Tabelle mit für jedes Muster:
@@ -82,8 +83,13 @@ Zusätzlich je Markt (und bei mehreren Märkten gepoolt) ein **Zonen-Vergleich**
 - Trend-Gruppen: in Trendrichtung, gegen den Trend, range
 - Je Gruppe: Anzahl, Anteil TP / SL / Timeout, Ø R, Standardfehler des Ø R, Summe R; unter 30 Trades ein Hinweis "zu wenige Fälle"
 - Verteilung: Anteil der Gruppe an allen Signalen und Ø starke Zonen je Signalkerze. Liegt eine Gruppe über 80 % oder unter 5 %, erscheint die Warnung "Zonenparameter möglicherweise unpassend" (Schwellen in `config.py`)
+- Kopfzeilen: Ø starke Zonen je Kerze und Seite sowie die Anteile der Gruppen a) und c). Liegt der Wert über `SR_WARN_MAX_ZONES` (Standard 4), erscheint "Zonen zu dicht"
+- Bei `--markets ALL` zusätzlich getrennt für die erste und zweite Hälfte des Zeitraums (Trennung am Median der Signalzeiten, gepoolt über alle Märkte), jeweils mit Anzahl, Ø R und Standardfehler
+
+`--sr-max-zones N` überschreibt `SR_MAX_ZONES_PER_SIDE` nur für den Backtest. Standard ist `None` (alle starken Zonen). Der Live-Bot ist davon nicht betroffen.
 
 Der Backtest verändert keine Signale. Die Zonen-Auswertung dient nur der Einschätzung.
+
 
 ### Tests
 
@@ -359,7 +365,9 @@ Parameter in `buchbot/config.py` (marktunabhängig, ATR-relativ):
 | `SR_MIN_ZONE_WIDTH_ATR` | `0.25` | Mindestbreite einer Zone in ATR |
 | `SR_MIN_TOUCHES` | `3` | Berührungen für eine starke Zone |
 | `SR_PROXIMITY_ATR` | `0.5` | Nähe in ATR für Zonenbezug und `sr_against` |
-| `SR_IN_MAIL` | `True` | Zeilen zur Zone in die Mail |
+| `SR_IN_MAIL` | `True` | Zeilen zur Zone in die Mail; per `.env` überschreibbar mit `BUCH_SR_IN_MAIL` (1/true/yes = an, 0/false/no = aus) |
+| `SR_MAX_ZONES_PER_SIDE` | `None` | `None`: alle starken Zonen. Zahl N: je Seite nur die N mit den meisten Berührungen (Gleichstand: dem Einstieg nähere). Wirkt auf alle `sr_*`-Tags |
+| `SR_WARN_MAX_ZONES` | `4` | Backtest-Warnung "Zonen zu dicht", wenn Ø starke Zonen je Kerze und Seite darüber liegen |
 | `SR_FETCH_PERIOD` | `"14d"` | yfinance-Zeitraum, wenn mehr Kerzen nötig sind |
 
 Die Pipeline holt für Zonen mindestens `SR_LOOKBACK_CANDLES + SWING_N` Kerzen. Fehlen Kerzen, wird eine Zeile ins Log geschrieben. Detektoren, Trendfilter, ATR und SL/TP arbeiten weiter mit den letzten `LOOKBACK_CANDLES`.

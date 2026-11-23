@@ -185,11 +185,13 @@ def test_funnel_stages_only_shrink():
 
 
 def make_trade(direction="BUY", source="candles_main", outcome="TP", r=1.0, aligned=None,
-               against=False, relation="none", trend="range", zones=2, market="EURUSD"):
+               against=False, relation="none", trend="range", zones=2, market="EURUSD",
+               time=None, support=0, resistance=0):
     tags = {"sr_aligned": aligned, "sr_against": against, "sr_relation": relation,
-            "swing_trend": trend, "sr_strong_zones": zones}
+            "swing_trend": trend, "sr_strong_zones": zones,
+            "sr_strong_support": support, "sr_strong_resistance": resistance}
     return {"pattern": "Test", "source": source, "direction": direction, "outcome": outcome,
-            "r": r, "tags": tags, "market": market}
+            "r": r, "tags": tags, "market": market, "signal_time": time}
 
 
 def test_zone_groups_assign_each_group_with_fixed_examples():
@@ -272,3 +274,42 @@ def test_parse_markets_accepts_all_and_lists_and_rejects_unknown():
     assert backtest._parse_markets("EURUSD, GBPUSD") == ["EURUSD", "GBPUSD"]
     with pytest.raises(Exception):
         backtest._parse_markets("EURUSD,NOPE")
+
+
+def test_signal_time_median_takes_upper_middle_and_ignores_neutral():
+    times = [pd.Timestamp(f"2026-01-0{d}", tz="UTC") for d in (1, 2, 3, 4)]
+    trades = [make_trade(time=t) for t in times]
+    assert backtest.signal_time_median(trades) == times[2]
+    assert backtest.signal_time_median([make_trade("NEUTRAL", time=times[0]), make_trade(time=times[1])]) == times[1]
+    assert backtest.signal_time_median([]) is None
+
+
+def test_time_halves_split_at_median_with_counts_and_group_rows():
+    t1 = pd.Timestamp("2026-01-01 10:00", tz="UTC")
+    t2 = pd.Timestamp("2026-01-03 10:00", tz="UTC")
+    early = [make_trade("BUY", aligned=True, relation="at_support", time=t1) for _ in range(2)]
+    late = [make_trade("BUY", aligned=True, relation="at_support", time=t2)]
+    out = backtest.render_zone_compare(early + late, default_config, "GESAMT", split_at=t2)
+    assert "Zeithälfte 1 (Signale vor 2026-01-03 10:00 UTC): 2 BUY/SELL-Signale" in out
+    assert "Zeithälfte 2 (Signale ab 2026-01-03 10:00 UTC): 1 BUY/SELL-Signale" in out
+    first_half = out.split("Zeithälfte 1")[1].split("Zeithälfte 2")[0]
+    row = next(line for line in first_half.splitlines() if line.startswith("a) Muster an starker passender Zone"))
+    assert row[38:46].strip() == "2"
+
+
+def test_zone_density_warning_only_above_limit():
+    dense = [make_trade("BUY", aligned=True, relation="at_support", support=5, resistance=5) for _ in range(3)]
+    sparse = [make_trade("BUY", aligned=True, relation="at_support", support=2, resistance=2) for _ in range(3)]
+    assert "Zonen zu dicht" in backtest.render_zone_compare(dense, default_config, "Test")
+    assert "Zonen zu dicht" not in backtest.render_zone_compare(sparse, default_config, "Test")
+
+
+def test_header_shows_mean_zones_per_side_and_group_shares():
+    population = [
+        make_trade("BUY", aligned=True, relation="at_support", support=2, resistance=4),
+        make_trade("SELL", against=True, relation="at_resistance", support=0, resistance=2),
+    ]
+    lines, warnings = backtest._header_lines(population, default_config, "Test")
+    assert lines[0] == "Ø starke Zonen je Kerze und Seite: 2.0 (Unterstützung 1.0, Widerstand 3.0)"
+    assert "Gruppe a) 50" in lines[1] and "Gruppe c) 50" in lines[1]
+    assert warnings == []
