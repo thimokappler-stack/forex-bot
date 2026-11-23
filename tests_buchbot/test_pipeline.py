@@ -184,6 +184,31 @@ def test_veraltete_daten_werden_gemeldet_und_nicht_ausgewertet(registry, paths, 
     assert not __import__("os").path.exists(paths["csv_path"])
 
 
+def test_systemuhr_geht_nach_bricht_lauf_ab(registry, paths, caplog):
+    fetch = fake_fetch(make_candles())  # neueste Kerze startet 09:45 UTC
+    behind_now = pd.Timestamp("2026-05-06 09:30", tz="UTC")
+    with caplog.at_level(logging.WARNING):
+        summary = pipeline.run(now=behind_now, config=make_config(), fetch=fetch, **paths)
+    assert summary["signals"] == 0
+    assert "Systemuhr geht nach" in caplog.text
+    assert not __import__("os").path.exists(paths["csv_path"])
+
+
+def test_systemuhr_korrekt_keine_warnung(registry, paths, caplog):
+    fetch = fake_fetch(make_candles())  # neueste Kerze startet 09:45, Systemzeit 10:00
+    with caplog.at_level(logging.WARNING):
+        summary = pipeline.run(now=NOW, config=make_config(), fetch=fetch, **paths)
+    assert summary["signals"] == 1
+    assert "Systemuhr geht nach" not in caplog.text
+
+
+def test_probelauf_mit_at_ist_von_uhrpruefung_ausgenommen(registry, paths, caplog):
+    fetch = fake_fetch(make_candles())  # Kerzen nach --at werden entfernt, Systemuhr irrelevant
+    with caplog.at_level(logging.WARNING):
+        pipeline.run(at="2026-05-06 09:30", config=make_config(), fetch=fetch, **paths)
+    assert "Systemuhr geht nach" not in caplog.text
+
+
 def test_fehlende_kerzen_brechen_nicht_ab(registry, paths, caplog):
     summary = pipeline.run(now=NOW, config=make_config(), fetch=lambda *a: None, **paths)
     assert summary["signals"] == 0

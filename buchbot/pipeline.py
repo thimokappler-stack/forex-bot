@@ -79,6 +79,13 @@ def run(at=None, now=None, config=default_config, fetch=get_candles,
         logger.error("Keine Kerzen erhalten. Lauf beendet, nächster Lauf versucht es erneut.")
         return summary
 
+    if not dry_run and pd.Timestamp(df.index[-1]) > now:
+        logger.warning(
+            "Systemuhr geht nach: neueste Kerze startet %s UTC, Systemzeit ist %s UTC. Lauf ohne Auswertung beendet.",
+            pd.Timestamp(df.index[-1]).isoformat(), now.isoformat(),
+        )
+        return summary
+
     if dry_run:
         df = df[df.index <= now]
     df = remove_incomplete_candle(df, config.INTERVAL, now=now)

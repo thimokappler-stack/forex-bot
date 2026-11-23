@@ -1,5 +1,7 @@
 # EUR/USD Candlestick Signal Bot
 
+> **Hinweis:** Für den neuen Bot (Paket `buchbot/`) haben `docs/ERGAENZUNG.md` und `docs/ERGAENZUNG_2.md` Vorrang vor dieser README. Der Start des neuen Bots lautet `python -m buchbot.main`.
+
 Ein Python-Bot, der den EUR/USD-Chart (15-Minuten-Kerzen) auf klassische Candlestick-Muster prüft und bei Erkennung eines Musters ein **Kauf- oder Verkaufssignal per E-Mail** versendet. Der Bot ist **nur ein Signalgeber** – er platziert keine Orders und führt keinen automatischen Handel durch.
 
 ## Features
@@ -64,7 +66,7 @@ Die Ausgabe geht in `bot.log` und zur Console. Jedes Signal wird in `state.json`
 Lädt maximal verfügbare 15m-Historie (etwa 60 Tage) und simuliert alle Trades:
 
 ```bash
-python backtest.py
+python -m buchbot.backtest
 ```
 
 Ausgabe: Tabelle mit für jedes Muster:
@@ -123,8 +125,8 @@ Prüft alle Muster, Trend-Filter, SL/TP-Berechnung und Duplikat-Schutz.
 ### Fünf-Kerzen-Muster
 | Muster | Signal | Regel |
 |---|---|---|
-| **Steigendes Dreier-Pattern** | BUY | K1 lang grün, K2–K4 klein (überwiegend rot) innerhalb K1-Spanne, K5 lang grün mit close > K1 close |
-| **Fallendes Dreier-Pattern** | SELL | K1 lang rot, K2–K4 klein (überwiegend grün) innerhalb K1-Spanne, K5 lang rot mit close < K1 close |
+| **Steigendes Dreier-Pattern** | BUY | K1 lang grün, alle drei mittleren Kerzen (K2–K4) klein und rot innerhalb K1-Spanne, K5 lang grün mit close > K1 close |
+| **Fallendes Dreier-Pattern** | SELL | K1 lang rot, alle drei mittleren Kerzen (K2–K4) klein und grün innerhalb K1-Spanne, K5 lang rot mit close < K1 close |
 
 ## Konfiguration (`config.py`)
 
