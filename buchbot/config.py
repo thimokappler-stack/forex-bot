@@ -40,11 +40,21 @@ MARKETS = {
         "tweezer_tolerance": None, "tweezer_atr_fraction": 0.15,
         "price_decimals": 2, "detectors": None,
     },
+    # Beobachtungsmarkt: EUR/USD mit 30m-Kerzen. Nur log_only, sendet nie Mails.
+    "EURUSD_30M": {
+        "display": "EUR/USD (30m)", "symbol": "EURUSD=X", "hours": "forex",
+        "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.0,
+        "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
+        "price_decimals": 5, "detectors": None,
+        "interval": "30m", "observe_only": True,
+    },
 }
 DEFAULT_MARKET = "EURUSD"
+# "interval" je Markt in MARKETS, fehlt er, gilt INTERVAL. "observe_only": nie Mail, Detektoren nur log_only.
 
 # === DATENQUELLE ===
-INTERVAL = "15m"              # Kerzenlänge
+INTERVAL = "15m"              # Kerzenlänge (Standard, je Markt überschreibbar)
+INTERVAL_MINUTES = {"15m": 15, "30m": 30}
 LOOKBACK_CANDLES = 100        # Anzahl geholter Kerzen
 
 # === TRENDFILTER ===
@@ -97,7 +107,7 @@ DETECTORS = {
 # Marktzeiten als (Wochentag, Stunde UTC); Montag = 0, Sonntag = 6
 MARKET_CLOSED_FROM = (4, 22)  # Freitag 22:00 UTC: Markt geschlossen
 MARKET_CLOSED_UNTIL = (6, 22) # Sonntag 22:00 UTC: Markt wieder offen
-STALE_MAX_MINUTES = 45        # Letzte geschlossene Kerze älter als das = "Daten veraltet"
+STALE_CANDLES = 3             # Letzte geschlossene Kerze älter als 3 Kerzenlängen = "Daten veraltet" (je Markt)
 CLOCK_TOLERANCE_MINUTES = 2   # Toleranz für die Uhrzeit-Prüfung (Systemuhr geht nach)
 EVAL_WINDOW_CANDLES = 2       # Pro Lauf ausgewertete geschlossene Kerzen (1 = nur die letzte)
 STATE_FILE = "state_new.json" # Duplikat-Schutz, relativ zum Projektordner
@@ -114,7 +124,7 @@ MAIL_TIMEOUT_SECONDS = 30
 MAIL_DISCLAIMER = "Kein Anlagerat, nur Mustererkennung."
 
 # === BACKTEST ===
-MAX_HOLD_CANDLES = 32         # Max Haltedauer: 32 Kerzen = 8 Stunden
+MAX_HOLD_MINUTES = 480        # Max Haltedauer: 8 Stunden, je Markt in Kerzen umgerechnet (15m: 32, 30m: 16)
 MIN_SIGNALS_FOR_STATS = 30    # Minimum Signale für belastbare Backtest-Aussage
 BACKTEST_PERIOD = "60d"       # Historie für den Backtest (yfinance-Maximum für 15m)
 BACKTEST_CSV_FILE = "backtest_results.csv"  # Einzelsignale, relativ zum Projektordner
@@ -210,6 +220,18 @@ def for_market(name, settings=None):
     cfg.TWEEZER_TOLERANCE = market["tweezer_tolerance"]
     cfg.TWEEZER_ATR_FRACTION = market["tweezer_atr_fraction"]
     cfg.PRICE_DECIMALS = market["price_decimals"]
+    cfg.INTERVAL = market.get("interval", INTERVAL)
+    if cfg.INTERVAL not in INTERVAL_MINUTES:
+        raise SettingsError(f"Markt '{name}': ungültiges Intervall '{cfg.INTERVAL}' "
+                            f"(erlaubt: {', '.join(INTERVAL_MINUTES)})")
+    minutes = INTERVAL_MINUTES[cfg.INTERVAL]
+    cfg.STALE_MAX_MINUTES = STALE_CANDLES * minutes
+    cfg.MAX_HOLD_CANDLES = MAX_HOLD_MINUTES // minutes
+    cfg.OBSERVE_ONLY = market.get("observe_only", False)
     cfg.DETECTORS = {**DETECTORS, **(market["detectors"] or {}), **settings["detector_modes"]}
-    cfg.NOTIFY_ENABLED = settings["notify_enabled"] and name in settings["notify_markets"]
+    if cfg.OBSERVE_ONLY:
+        cfg.DETECTORS = {key: ("off" if mode == "off" else "log_only") for key, mode in cfg.DETECTORS.items()}
+    cfg.NOTIFY_IGNORED = cfg.OBSERVE_ONLY and name in settings["notify_markets"]
+    cfg.NOTIFY_ENABLED = (settings["notify_enabled"] and name in settings["notify_markets"]
+                          and not cfg.OBSERVE_ONLY)
     return cfg

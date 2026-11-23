@@ -19,11 +19,12 @@ logger = logging.getLogger(__name__)
 
 def get_candles(symbol=None, interval=INTERVAL, lookback=LOOKBACK_CANDLES, period="5d"):
     """
-    Holt die letzten `lookback` geschlossenen 15m-Kerzen von yfinance.
+    Holt Kerzen von yfinance. `interval` ist die Kerzenlänge je Markt (z.B. "15m", "30m"),
+    `lookback` die Anzahl der letzten Kerzen (None = alle).
     
     Args:
         symbol: yfinance Symbol (z.B. "EURUSD=X"). None = Symbol des Standardmarktes.
-        interval: Kerzenlänge (z.B. "15m")
+        interval: Kerzenlänge (z.B. "15m", "30m")
         lookback: Anzahl Kerzen zum Abholen
     
     Returns:

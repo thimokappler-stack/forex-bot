@@ -65,6 +65,10 @@ def run_market(config, now, dry_run, fetch=get_candles, state_path=None, csv_pat
     csv_path = csv_path or BASE_DIR / config.SIGNALS_CSV_FILE
     summary = {"signals": 0, "new": 0, "mailed": 0, "dry_run": dry_run}
 
+    if config.NOTIFY_IGNORED:
+        logger.info("[%s] Beobachtungsmarkt: in BUCH_NOTIFY_MARKETS genannt, Mails werden ignoriert",
+                    config.MARKET)
+
     if not is_market_open(now, config):
         logger.info("Forex-Wochenende, Markt geschlossen. Lauf beendet (%s UTC)", now.isoformat())
         return summary
