@@ -76,7 +76,7 @@ pip install -r requirements.txt
 cp .env.example .env
 nano .env
 # Editiere:
-# MAIL_USER=thimo.kappler@gmail.com
+# MAIL_USER=deine.adresse@gmail.com
 # MAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
 # MAIL_TO=thimo.kappler@gmail.com (oder andere Adresse)
 
