@@ -31,8 +31,9 @@ def apply(signals, config):
         risk = abs(signal.entry - sl)
         if risk < config.MIN_SL_PIPS * config.PIP_SIZE:
             logger.info(
-                "Signal verworfen: %s (%s), Risiko %.1f Pips unter Minimum %s Pips",
-                signal.pattern, signal.time, risk / config.PIP_SIZE, config.MIN_SL_PIPS,
+                "Signal verworfen: %s %s (%s), Risiko %.1f %s unter Minimum %s %s",
+                signal.market, signal.pattern, signal.time, risk / config.PIP_SIZE,
+                config.RISK_UNIT, config.MIN_SL_PIPS, config.RISK_UNIT,
             )
             continue
 

@@ -176,6 +176,50 @@ Ist Risk < `MIN_SL_PIPS`, wird das Signal **nicht versendet**.
 - Risk = 0.0020 (20 Pips)
 - TP = 1.1000 + 2 × 0.0020 = 1.1040
 
+## Mehrmarkt-Betrieb (neuer Bot, `buchbot/`)
+
+Ein Lauf von `python -m buchbot.main` wertet alle Märkte nacheinander aus:
+
+| Markt-Schlüssel | Anzeige | yfinance-Symbol | Handelszeiten |
+|---|---|---|---|
+| `EURUSD` | EUR/USD | `EURUSD=X` | Forex (Fr 22:00 bis So 22:00 UTC geschlossen) |
+| `GBPUSD` | GBP/USD | `GBPUSD=X` | Forex |
+| `BTC` | BTC/USD | `BTC-USD` | 24/7 |
+| `ETH` | ETH/USD | `ETH-USD` | 24/7 |
+
+Ein Fehler in einem Markt (Abruf, Daten) bricht die übrigen Märkte nicht ab. Exit-Code 1 gibt es nur bei unerwarteten Fehlern. Zustand (`state_new.json`, Schlüssel mit Markt), CSV (`signals_log.csv`, Spalte `market`) und Betreff (z. B. `[BUCH] BUY GBP/USD – Morning Star (15m)`) sind je Markt getrennt.
+
+**Standard: alle Märkte und Detektoren laufen im Modus `log_only`, es werden keine Mails versendet.** Mails schaltet man in der `.env` frei:
+
+```bash
+BUCH_NOTIFY_ENABLED=1                      # 1/true/yes = an
+BUCH_NOTIFY_MARKETS=EURUSD,GBPUSD          # nur diese Märkte senden Mails
+BUCH_DETECTOR_MODES=candles_main=notify,candles_single=log_only
+```
+
+Ungültige Werte führen beim Start zu einer Fehlermeldung mit Exit-Code 1. Einzelkerzen (`candles_single`) gehen nie per Mail. Mit `python -m buchbot.main --test-mail` prüft man den Versand: Es wird eine Mail `[BUCH] Testmail` gesendet, ohne Zustand oder CSV zu ändern.
+
+Backtest und Auswertung laufen mit `--market` (Standard: alle Märkte):
+
+```bash
+python -m buchbot.backtest --market BTC
+python -m buchbot.evaluate [--csv signals_log.csv] [--market GBPUSD] [--allow-overlap] [--out ergebnis.csv]
+```
+
+Für Krypto ist die Risikoeinheit USD statt Pips, und die Preise werden auf 2 Nachkommastellen gerundet. Der yfinance-Zeitraum bleibt bei `60d`, da 15m-Daten nicht länger verfügbar sind.
+
+### Umstellung vom alten auf den neuen Bot
+
+Der alte Bot (`main.py`, `main_gbpusd.py`, `main_btc.py`, `main_eth.py`) bleibt im Repository unverändert und läuft weiter, bis man umstellt. Empfohlene Reihenfolge:
+
+1. Neuen Bot per Cron im Modus `log_only` parallel laufen lassen (keine Mails, nur CSV).
+2. Mit `python -m buchbot.evaluate` prüfen, ob die Signale plausibel sind.
+3. Eine Testmail mit `--test-mail` senden lassen.
+4. Für einen Markt `BUCH_NOTIFY_MARKETS` setzen und `BUCH_NOTIFY_ENABLED=1`. Solange der alte Bot für denselben Markt ebenfalls Mails sendet, kommen Signale doppelt an. Deshalb den alten Cron-Eintrag für diesen Markt vorher entfernen.
+5. Schrittweise alle Märkte umstellen, dann den alten Cron-Eintrag entfernen.
+
+Der neue Bot liest und schreibt die Zustandsdateien des alten Bots (`state.json`, `state_gbpusd.json`, `state_btc.json`, `state_eth.json`) nie.
+
 ## Betrieb auf Raspberry Pi
 
 ### Cron-Eintrag

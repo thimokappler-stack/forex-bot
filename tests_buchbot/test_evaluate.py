@@ -1,5 +1,4 @@
 import csv
-from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -15,10 +14,11 @@ SIGNAL_FIELDS = ["time", "symbol", "interval", "source", "pattern", "direction",
 
 
 def make_config(**overrides):
-    values = {k: getattr(default_config, k) for k in dir(default_config) if k.isupper()}
-    values["MAX_HOLD_CANDLES"] = 1
-    values.update(overrides)
-    return SimpleNamespace(**values)
+    cfg = default_config.for_market(default_config.DEFAULT_MARKET)
+    cfg.MAX_HOLD_CANDLES = 1
+    for key, value in overrides.items():
+        setattr(cfg, key, value)
+    return cfg
 
 
 def make_df(rows):
@@ -126,7 +126,7 @@ def test_empty_csv_main_returns_zero_without_fetching(tmp_path, capsys):
     def fetch(*args, **kwargs):
         pytest.fail("Kerzen dürfen bei leerer CSV nicht geladen werden")
 
-    assert evaluate.main(config=make_config(), fetch=fetch, csv_path=path) == 0
+    assert evaluate.main(fetch=fetch, csv_path=path) == 0
     assert "Keine Signale" in capsys.readouterr().out
 
 
@@ -141,7 +141,7 @@ def test_missing_columns_give_clear_error(tmp_path, capsys):
     def fetch(*args, **kwargs):
         pytest.fail("Kerzen dürfen bei fehlenden Spalten nicht geladen werden")
 
-    assert evaluate.main(config=make_config(), fetch=fetch, csv_path=path) == 1
+    assert evaluate.main(fetch=fetch, csv_path=path) == 1
     assert "Pflichtspalten fehlen" in capsys.readouterr().out
 
 
@@ -227,7 +227,7 @@ def test_main_prints_too_old_line_with_data_range(tmp_path, capsys):
     path = tmp_path / "signals_log.csv"
     write_csv(path, [signal_row(time="2026-01-05T10:00:00+00:00")])
 
-    exit_code = evaluate.main(config=make_config(MAX_HOLD_CANDLES=3), fetch=lambda *a, **k: df, csv_path=path)
+    exit_code = evaluate.main(fetch=lambda *a, **k: df, csv_path=path)
 
     out = capsys.readouterr().out
     assert exit_code == 0

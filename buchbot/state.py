@@ -32,7 +32,7 @@ def load_state(path):
 
 
 def signal_key(signal):
-    return f"{signal.symbol}|{signal.pattern}|{to_utc(signal.time).isoformat()}"
+    return f"{signal.market}|{signal.symbol}|{signal.pattern}|{to_utc(signal.time).isoformat()}"
 
 
 def is_sent(state, key):

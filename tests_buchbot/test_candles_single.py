@@ -4,7 +4,6 @@ Tests für buchbot/detectors/candles_single.py (Einzelkerzen im Hintergrund).
 Feste Zahlen mit ATR 0.0010 (Schwellen: kleiner Körper <= 0.0003, Doji-Körper <= 10 % der Spanne).
 """
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -28,9 +27,10 @@ def C(o, h, l, c):
 
 
 def make_config(**overrides):
-    values = {k: getattr(real_config, k) for k in dir(real_config) if k.isupper()}
-    values.update(overrides)
-    return SimpleNamespace(**values)
+    cfg = real_config.for_market(real_config.DEFAULT_MARKET)
+    for key, value in overrides.items():
+        setattr(cfg, key, value)
+    return cfg
 
 
 def build_df(candles, start):
@@ -175,9 +175,9 @@ def test_log_only_schreibt_csv_ohne_mail(only_single, monkeypatch, tmp_path):
     cfg = make_config(DETECTORS={"candles_single": "log_only"}, NOTIFY_ENABLED=True)
     csv_path = tmp_path / "signals_log.csv"
 
-    summary = pipeline.run(
-        now=NOW, config=cfg, fetch=lambda symbol, interval, lookback: df.copy(),
-        state_path=str(tmp_path / "state_new.json"), csv_path=str(csv_path),
+    summary = pipeline.run_market(
+        cfg, NOW, False, lambda symbol, interval, lookback: df.copy(),
+        str(tmp_path / "state_new.json"), str(csv_path),
     )
 
     assert summary["signals"] == 1

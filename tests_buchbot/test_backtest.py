@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -10,11 +8,12 @@ from buchbot.models import Signal
 
 
 def make_config(**overrides):
-    values = {k: getattr(default_config, k) for k in dir(default_config) if k.isupper()}
+    cfg = default_config.for_market(default_config.DEFAULT_MARKET)
     # Kurze Testreihen: Haltefenster passt in die Daten, sonst gilt der Trade als offen
-    values["MAX_HOLD_CANDLES"] = 1
-    values.update(overrides)
-    return SimpleNamespace(**values)
+    cfg.MAX_HOLD_CANDLES = 1
+    for key, value in overrides.items():
+        setattr(cfg, key, value)
+    return cfg
 
 
 def make_df(rows):

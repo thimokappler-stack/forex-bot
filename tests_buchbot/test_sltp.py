@@ -7,9 +7,11 @@ import logging
 import pandas as pd
 import pytest
 
-import buchbot.config as cfg
+from buchbot import config as base_config
 from buchbot import sltp
 from buchbot.models import Signal
+
+cfg = base_config.for_market("EURUSD")
 
 
 def make_signal(direction, entry, atr, **tags):
@@ -23,6 +25,7 @@ def make_signal(direction, entry, atr, **tags):
         entry=entry,
         atr=atr,
         tags=tags,
+        market="EURUSD",
     )
 
 

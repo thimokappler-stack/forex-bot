@@ -8,8 +8,42 @@ Richtlinien:
 - Parameter-Namen aussagekräftig, mit Kommentar erklären
 """
 
+from types import SimpleNamespace
+
+# === MÄRKTE ===
+# Je Markt: Anzeigename, yfinance-Symbol, Handelszeiten ("forex" = Fr 22:00 bis So 22:00 UTC
+# geschlossen, "24_7" ohne Pause), Pip-Größe, Risiko-Einheit, Mindestabstand des SL,
+# Spread (Backtest), Tweezer-Toleranz (absolut oder Anteil am ATR), Preisformat.
+# "detectors": None = globale DETECTORS, sonst eigene Modi je Detektor.
+MARKETS = {
+    "EURUSD": {
+        "display": "EUR/USD", "symbol": "EURUSD=X", "hours": "forex",
+        "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.0,
+        "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
+        "price_decimals": 5, "detectors": None,
+    },
+    "GBPUSD": {
+        "display": "GBP/USD", "symbol": "GBPUSD=X", "hours": "forex",
+        "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.0,
+        "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
+        "price_decimals": 5, "detectors": None,
+    },
+    "BTC": {
+        "display": "BTC/USD", "symbol": "BTC-USD", "hours": "24_7",
+        "pip_size": 1.0, "risk_unit": "USD", "min_sl_pips": 10, "spread_pips": 10.0,
+        "tweezer_tolerance": None, "tweezer_atr_fraction": 0.15,
+        "price_decimals": 2, "detectors": None,
+    },
+    "ETH": {
+        "display": "ETH/USD", "symbol": "ETH-USD", "hours": "24_7",
+        "pip_size": 1.0, "risk_unit": "USD", "min_sl_pips": 5, "spread_pips": 5.0,
+        "tweezer_tolerance": None, "tweezer_atr_fraction": 0.15,
+        "price_decimals": 2, "detectors": None,
+    },
+}
+DEFAULT_MARKET = "EURUSD"
+
 # === DATENQUELLE ===
-SYMBOL = "EURUSD=X"           # yfinance Symbol für EUR/USD
 INTERVAL = "15m"              # Kerzenlänge
 LOOKBACK_CANDLES = 100        # Anzahl geholter Kerzen
 
@@ -25,7 +59,7 @@ LONG_BODY_ATR = 0.8           # "Lange Kerze": Körper ≥ 0.8 × ATR
 SMALL_BODY_ATR = 0.3          # "Kleiner Körper": Körper ≤ 0.3 × ATR
 
 # === MUSTER-TOLERANZEN ===
-TWEEZER_TOLERANCE = 0.00015   # ~1.5 Pips Toleranz bei "gleichen" Hochs/Tiefs
+# Tweezer-Toleranz je Markt in MARKETS (absolut oder Anteil am ATR)
 TWEEZER_BODY_SIMILARITY = 0.6 # Kleinerer Körper ≥ 60% des größeren
 
 # === STAR-MUSTER (Morning/Evening Star) ===
@@ -39,6 +73,7 @@ SOLDIERS_K1_MAX_ATR = 0.5              # K1 "klein": Körper ≤ 0.5 × ATR
 
 # === DREIER-PATTERN (Rising/Falling) ===
 RISEFALL_REQUIRE_INSIDE_RANGE = True   # Mittlere Kerzen innerhalb Spanne K1
+RISEFALL_MIN_COUNTER_CANDLES = 3       # Mindestzahl gegenläufiger Mittelkerzen (3 = Buchregel, 2 = altes Verhalten)
 
 # === EINZELKERZEN-MUSTER (Hintergrund-Analyse, Betriebsart über DETECTORS) ===
 DOJI_BODY_RATIO = 0.10                 # Doji: Körper ≤ 10% der Kerzenspanne
@@ -47,9 +82,8 @@ WICK_SMALL_RATIO = 0.10                # Kleiner Docht ≤ 10% der Kerzenspanne
 
 # === RISIKO & STOP-LOSS ===
 SL_BUFFER_ATR = 0.5           # Puffer hinter Muster-Extrem: 0.5 × ATR
-MIN_SL_PIPS = 5               # Mindestabstand Einstieg bis SL in Pips
 RISK_REWARD = 2.0             # Take-Profit = 2 × Risiko → CRV 1:2
-PIP_SIZE = 0.0001             # Pip-Größe bei EUR/USD
+# Mindestabstand (min_sl_pips), Pip-Größe und Einheit stehen je Markt in MARKETS
 
 # === DETEKTOREN ===
 # Betrieb je Detektor: "off", "log_only" (nur Log/CSV), "notify" (E-Mail)
@@ -57,6 +91,7 @@ DETECTORS = {
     "candles_main": "log_only",
     "candles_single": "log_only",
 }
+# Überschreibbar per .env: BUCH_DETECTOR_MODES="candles_main=notify,candles_single=log_only"
 
 # === PIPELINE & MARKTZEITEN ===
 # Marktzeiten als (Wochentag, Stunde UTC); Montag = 0, Sonntag = 6
@@ -70,8 +105,8 @@ STATE_RETENTION_DAYS = 7      # Einträge im Duplikat-Schutz werden nach so viel
 SIGNALS_CSV_FILE = "signals_log.csv"  # Signal-Protokoll, relativ zum Projektordner
 
 # === E-MAIL ===
-NOTIFY_ENABLED = False        # Schalter: solange False, wird keine Mail gesendet
-DISPLAY_SYMBOL = "EUR/USD"    # Anzeigename im Betreff und Text
+# Mails nur, wenn NOTIFY_ENABLED an ist UND der Markt in BUCH_NOTIFY_MARKETS steht (.env)
+NOTIFY_ENABLED = False        # Standard aus; Überschreibung per .env: BUCH_NOTIFY_ENABLED
 DISPLAY_TZ = "Europe/Berlin"  # Lokale Zeit in der Mail
 MAIL_SMTP_HOST = "smtp.gmail.com"
 MAIL_SMTP_PORT = 465          # SMTP über SSL
@@ -80,7 +115,101 @@ MAIL_DISCLAIMER = "Kein Anlagerat, nur Mustererkennung."
 
 # === BACKTEST ===
 MAX_HOLD_CANDLES = 32         # Max Haltedauer: 32 Kerzen = 8 Stunden
-SPREAD_PIPS = 1.0             # Angenommener Spread in Pips
 MIN_SIGNALS_FOR_STATS = 30    # Minimum Signale für belastbare Backtest-Aussage
 BACKTEST_PERIOD = "60d"       # Historie für den Backtest (yfinance-Maximum für 15m)
 BACKTEST_CSV_FILE = "backtest_results.csv"  # Einzelsignale, relativ zum Projektordner
+
+# Detektoren, die nie per Mail laufen dürfen (Hintergrund-Analyse)
+LOG_ONLY_DETECTORS = ("candles_single",)
+DETECTOR_MODES = ("off", "log_only", "notify")
+
+
+class SettingsError(ValueError):
+    """Ungültiger Wert in den Einstellungen (.env)."""
+
+
+def read_settings(environ):
+    """Liest BUCH_NOTIFY_ENABLED, BUCH_NOTIFY_MARKETS und BUCH_DETECTOR_MODES."""
+    enabled_raw = environ.get("BUCH_NOTIFY_ENABLED", "").strip().lower()
+    if enabled_raw == "":
+        notify_enabled = NOTIFY_ENABLED
+    elif enabled_raw in ("1", "true", "yes"):
+        notify_enabled = True
+    elif enabled_raw in ("0", "false", "no"):
+        notify_enabled = False
+    else:
+        raise SettingsError(
+            f"BUCH_NOTIFY_ENABLED: ungültiger Wert '{enabled_raw}' "
+            "(erlaubt: 1, true, yes, 0, false, no)"
+        )
+
+    notify_markets = []
+    for name in environ.get("BUCH_NOTIFY_MARKETS", "").split(","):
+        name = name.strip().upper()
+        if not name:
+            continue
+        if name not in MARKETS:
+            raise SettingsError(
+                f"BUCH_NOTIFY_MARKETS: unbekannter Markt '{name}' "
+                f"(erlaubt: {', '.join(MARKETS)})"
+            )
+        notify_markets.append(name)
+
+    detector_modes = {}
+    for item in environ.get("BUCH_DETECTOR_MODES", "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise SettingsError(
+                f"BUCH_DETECTOR_MODES: '{item}' hat kein Format name=modus"
+            )
+        name, mode = (part.strip() for part in item.split("=", 1))
+        if name not in DETECTORS:
+            raise SettingsError(
+                f"BUCH_DETECTOR_MODES: unbekannter Detektor '{name}' "
+                f"(erlaubt: {', '.join(DETECTORS)})"
+            )
+        if mode not in DETECTOR_MODES:
+            raise SettingsError(
+                f"BUCH_DETECTOR_MODES: unbekannter Modus '{mode}' "
+                f"(erlaubt: {', '.join(DETECTOR_MODES)})"
+            )
+        if name in LOG_ONLY_DETECTORS and mode == "notify":
+            raise SettingsError(
+                f"BUCH_DETECTOR_MODES: '{name}' darf nicht im Modus notify laufen"
+            )
+        detector_modes[name] = mode
+
+    return {
+        "notify_enabled": notify_enabled,
+        "notify_markets": tuple(notify_markets),
+        "detector_modes": detector_modes,
+    }
+
+
+def for_market(name, settings=None):
+    """
+    Liefert eine Konfiguration für einen Markt: gemeinsame Werte aus diesem Modul,
+    überschrieben durch die Marktwerte aus MARKETS und die Einstellungen aus .env.
+    """
+    if name not in MARKETS:
+        raise SettingsError(f"Unbekannter Markt '{name}' (erlaubt: {', '.join(MARKETS)})")
+    settings = settings if settings is not None else read_settings({})
+    market = MARKETS[name]
+
+    cfg = SimpleNamespace(**{key: value for key, value in globals().items() if key.isupper()})
+    cfg.MARKET = name
+    cfg.HOURS = market["hours"]
+    cfg.SYMBOL = market["symbol"]
+    cfg.DISPLAY_SYMBOL = market["display"]
+    cfg.PIP_SIZE = market["pip_size"]
+    cfg.RISK_UNIT = market["risk_unit"]
+    cfg.MIN_SL_PIPS = market["min_sl_pips"]
+    cfg.SPREAD_PIPS = market["spread_pips"]
+    cfg.TWEEZER_TOLERANCE = market["tweezer_tolerance"]
+    cfg.TWEEZER_ATR_FRACTION = market["tweezer_atr_fraction"]
+    cfg.PRICE_DECIMALS = market["price_decimals"]
+    cfg.DETECTORS = {**DETECTORS, **(market["detectors"] or {}), **settings["detector_modes"]}
+    cfg.NOTIFY_ENABLED = settings["notify_enabled"] and name in settings["notify_markets"]
+    return cfg

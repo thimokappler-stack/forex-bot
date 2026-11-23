@@ -87,6 +87,7 @@ def signal_from_row(row, config):
 
     return Signal(
         time=to_utc(row["time"]),
+        market=row.get("market") or config.MARKET,
         symbol=row.get("symbol") or config.SYMBOL,
         interval=row.get("interval") or config.INTERVAL,
         source=row["source"],
@@ -131,32 +132,23 @@ def evaluate_rows(rows, df, config, allow_overlap=False):
     return trades, sum(skipped.values()), too_old
 
 
-def main(config=default_config, fetch=get_candles, csv_path=None, out_path=None, allow_overlap=False):
-    path = Path(csv_path) if csv_path else BASE_DIR / config.SIGNALS_CSV_FILE
-    if not path.exists():
-        print(f"Signaldatei nicht gefunden: {path}")
-        return 1
-    try:
-        rows = read_signal_rows(path)
-    except ValueError as error:
-        print(f"Fehler in {path}: {error}")
-        return 1
-    if not rows:
-        print(f"Keine Signale in {path}")
-        return 0
-
+def _evaluate_market(name, rows, fetch, allow_overlap, trades_out):
+    """Wertet die Zeilen eines Marktes aus, druckt den Bericht und hängt die Trades an trades_out an."""
+    config = default_config.for_market(name)
     df = fetch(config.SYMBOL, config.INTERVAL, lookback=None, period=config.BACKTEST_PERIOD)
     if df is None or len(df) == 0:
-        print("Keine Kerzen erhalten, Auswertung abgebrochen.")
-        return 1
+        print(f"[{config.MARKET}] Keine Kerzen erhalten, Auswertung dieses Marktes übersprungen.\n")
+        return False
     df = remove_incomplete_candle(df, config.INTERVAL)
 
     trades, skipped, too_old = evaluate_rows(rows, df, config, allow_overlap)
-    if not trades and not too_old:
-        print(f"Keine auswertbaren Signale in {path}")
-        return 0
+    for trade in trades:
+        trade["market"] = config.MARKET
+        trade["decimals"] = config.PRICE_DECIMALS
+    trades_out.extend(trades)
 
-    print(f"Signale in {path}: {len(rows)}")
+    print(f"=== {config.DISPLAY_SYMBOL} ({config.MARKET}) ===")
+    print(f"Signale in der CSV: {len(rows)}")
     if trades:
         times = [t["signal_time"] for t in trades]
         print(f"Zeitraum der CSV: {min(times).isoformat()} bis {max(times).isoformat()} (UTC)")
@@ -171,21 +163,61 @@ def main(config=default_config, fetch=get_candles, csv_path=None, out_path=None,
     print(f"offen: {open_count(trades)} (Haltefenster oder Signalkerze außerhalb der Kerzen, nicht in der Statistik)")
     print(f"übersprungen: {skipped} (Muster hatte noch einen offenen Trade, nicht in der Statistik)")
     print(f"zu alt für die Kerzendaten: {too_old} (Signalkerze vor dem ersten geladenen Kerzenzeitpunkt)")
+    print()
+    return True
+
+
+def main(csv_path=None, out_path=None, allow_overlap=False, markets=None, fetch=get_candles):
+    path = Path(csv_path) if csv_path else BASE_DIR / default_config.SIGNALS_CSV_FILE
+    if not path.exists():
+        print(f"Signaldatei nicht gefunden: {path}")
+        return 1
+    try:
+        rows = read_signal_rows(path)
+    except ValueError as error:
+        print(f"Fehler in {path}: {error}")
+        return 1
+    if not rows:
+        print(f"Keine Signale in {path}")
+        return 0
+
+    by_market = {}
+    for row in rows:
+        market = row.get("market") or default_config.DEFAULT_MARKET
+        by_market.setdefault(market, []).append(row)
+    selected = list(markets) if markets else list(by_market)
+
+    status = 0
+    all_trades = []
+    for name in selected:
+        if name not in default_config.MARKETS:
+            print(f"Unbekannter Markt: {name}")
+            status = 1
+            continue
+        market_rows = by_market.get(name, [])
+        if not market_rows:
+            print(f"[{name}] Keine Signale in {path}\n")
+            continue
+        if not _evaluate_market(name, market_rows, fetch, allow_overlap, all_trades):
+            status = 1
 
     if out_path:
-        write_csv(trades, out_path)
+        write_csv(all_trades, out_path)
         print(f"Einzelergebnisse: {out_path}")
-    return 0
+    return status
 
 
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Auswertung der Schattenbetrieb-Signale aus signals_log.csv")
     parser.add_argument("--csv", help="Pfad zur Signaldatei (Standard: signals_log.csv im Projektordner)")
     parser.add_argument("--out", help="Einzelergebnisse als CSV schreiben, z. B. ergebnis.csv")
+    parser.add_argument("--market", choices=sorted(default_config.MARKETS),
+                        help="Nur ein Markt (Standard: alle Märkte in der CSV)")
     parser.add_argument("--allow-overlap", action="store_true",
                         help="alle Signale auswerten, auch wenn für dasselbe Muster ein Trade offen ist")
     args = parser.parse_args(argv)
-    return main(csv_path=args.csv, out_path=args.out, allow_overlap=args.allow_overlap)
+    return main(csv_path=args.csv, out_path=args.out, allow_overlap=args.allow_overlap,
+                markets=[args.market] if args.market else None)
 
 
 if __name__ == "__main__":

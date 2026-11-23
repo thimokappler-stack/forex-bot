@@ -16,12 +16,12 @@ def to_utc(value):
     return ts.tz_convert("UTC")
 
 
-PRICE_DECIMALS = 5
+DEFAULT_PRICE_DECIMALS = 5
 
 
-def format_price(value):
-    """Preis für Log, CSV und Mail mit 5 Nachkommastellen. None bleibt None."""
-    return None if value is None else f"{float(value):.{PRICE_DECIMALS}f}"
+def format_price(value, decimals=DEFAULT_PRICE_DECIMALS):
+    """Preis für Log, CSV und Mail mit dem Format des Marktes. None bleibt None."""
+    return None if value is None else f"{float(value):.{decimals}f}"
 
 
 @dataclass
@@ -39,4 +39,5 @@ class Signal:
     risk_pips: Optional[float] = None
     rr: Optional[float] = None
     mode: str = "log_only"         # "off", "log_only", "notify" (vom Detektor-Betrieb gesetzt)
+    market: Optional[str] = None   # Marktname aus MARKETS, z. B. "EURUSD"
     tags: dict = field(default_factory=dict)

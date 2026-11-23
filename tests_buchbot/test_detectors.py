@@ -62,7 +62,7 @@ class TestSignalModel:
 class TestCandlesMainDetect:
     def test_returns_signal_with_expected_fields(self):
         df = make_df(FILLER + ENG_POS)
-        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+        cfg = real_config.for_market("EURUSD")
 
         signals = candles_main.detect(df, cfg)
 
@@ -88,7 +88,7 @@ class TestCandlesMainDetect:
         # Ein Extrem außerhalb des Musters (Kerze vor dem Muster) darf nicht zählen
         outside = Candle(1.2000, 1.2500, 1.1900, 1.2000)
         df = make_df([outside] + FILLER + ENG_POS)
-        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+        cfg = real_config.for_market("EURUSD")
 
         hit = next(s for s in candles_main.detect(df, cfg) if s.pattern == "Bullish Engulfing")
 
@@ -106,7 +106,7 @@ class TestCandlesMainDetect:
             Candle(1.0996, 1.1030, 1.0994, 1.1025),
         ]
         df = make_df([outside] + FILLER + rise_five)
-        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+        cfg = real_config.for_market("EURUSD")
 
         hit = next(s for s in candles_main.detect(df, cfg) if s.pattern == "Steigendes Dreier-Pattern")
 
@@ -116,7 +116,7 @@ class TestCandlesMainDetect:
 
     def test_n_candles_matches_pattern_size(self):
         df = make_df(FILLER + ENG_POS)
-        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+        cfg = real_config.for_market("EURUSD")
 
         hit = next(s for s in candles_main.detect(df, cfg) if s.pattern == "Bullish Engulfing")
 
@@ -124,7 +124,7 @@ class TestCandlesMainDetect:
 
     def test_signal_time_is_candle_close_time(self):
         df = make_df(FILLER + ENG_POS, start="2026-01-01 12:15")
-        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+        cfg = real_config.for_market("EURUSD")
 
         hit = next(s for s in candles_main.detect(df, cfg) if s.pattern == "Bullish Engulfing")
 
@@ -133,19 +133,19 @@ class TestCandlesMainDetect:
 
     def test_no_signals_without_pattern(self):
         df = make_df(FILLER + [Candle(1.1000, 1.1005, 1.0995, 1.1000)] * 2)
-        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+        cfg = real_config.for_market("EURUSD")
 
         assert candles_main.detect(df, cfg) == []
 
     def test_too_few_candles_gives_no_signals(self):
         df = make_df(ENG_POS)
-        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+        cfg = real_config.for_market("EURUSD")
 
         assert candles_main.detect(df, cfg) == []
 
     def test_atr_nan_gives_no_signals(self, monkeypatch):
         df = make_df(FILLER + ENG_POS)
-        cfg = SimpleNamespace(SYMBOL="EURUSD=X", INTERVAL="15m", ATR_PERIOD=14)
+        cfg = real_config.for_market("EURUSD")
         nan_atr = pd.Series([float("nan")] * len(df), index=df.index)
         monkeypatch.setattr(candles_main, "calculate_atr", lambda df, period=None: nan_atr)
 
@@ -217,7 +217,7 @@ class TestRegistry:
     def test_real_config_runs_candles_main_in_log_only(self):
         df = make_df(FILLER + ENG_POS)
 
-        signals = detectors.run_detectors(df, real_config)
+        signals = detectors.run_detectors(df, real_config.for_market("EURUSD"))
 
         assert any(s.pattern == "Bullish Engulfing" for s in signals)
         assert all(s.source == "candles_main" for s in signals)

@@ -1,6 +1,5 @@
 import email
 from email import policy
-from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -10,10 +9,11 @@ from buchbot.models import Signal
 from buchbot.outputs import mail
 
 
-def make_config(**overrides):
-    values = {k: getattr(real_config, k) for k in dir(real_config) if k.isupper()}
-    values.update(overrides)
-    return SimpleNamespace(**values)
+def make_config(market=None, **overrides):
+    cfg = real_config.for_market(market or real_config.DEFAULT_MARKET)
+    for key, value in overrides.items():
+        setattr(cfg, key, value)
+    return cfg
 
 
 def make_signal(direction="BUY", pattern="Morning Star", time="2026-05-06 10:15"):

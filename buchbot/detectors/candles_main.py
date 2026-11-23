@@ -84,41 +84,57 @@ def _similar_bodies(c1, c2):
     return big > 0 and min(body(c1), body(c2)) / big >= cfg.TWEEZER_BODY_SIMILARITY
 
 
-def bullish_engulfing(candles, atr):
+def _tolerance_or_default(tolerance):
+    """Ohne Angabe gilt die Toleranz des Standardmarktes."""
+    if tolerance is not None:
+        return tolerance
+    return cfg.for_market(cfg.DEFAULT_MARKET).TWEEZER_TOLERANCE
+
+
+def tweezer_tolerance(config, atr_value):
+    """Absolute Toleranz (EUR/USD, GBP/USD) oder Anteil am ATR (BTC, ETH)."""
+    if config.TWEEZER_ATR_FRACTION is not None:
+        return config.TWEEZER_ATR_FRACTION * atr_value
+    return config.TWEEZER_TOLERANCE
+
+
+def bullish_engulfing(candles, atr, tolerance=None):
     c1, c2 = candles
     return is_red(c1) and is_green(c2) and _engulfs(c1, c2)
 
 
-def bearish_engulfing(candles, atr):
+def bearish_engulfing(candles, atr, tolerance=None):
     c1, c2 = candles
     return is_green(c1) and is_red(c2) and _engulfs(c1, c2)
 
 
-def tweezer_bottom(candles, atr):
+def tweezer_bottom(candles, atr, tolerance=None):
     c1, c2 = candles
+    tol = _tolerance_or_default(tolerance)
     return (
         is_red(c1)
         and is_green(c2)
         and is_small(c1, atr)
         and is_small(c2, atr)
         and _similar_bodies(c1, c2)
-        and abs(c1.low - c2.low) <= cfg.TWEEZER_TOLERANCE
+        and abs(c1.low - c2.low) <= tol
     )
 
 
-def tweezer_top(candles, atr):
+def tweezer_top(candles, atr, tolerance=None):
     c1, c2 = candles
+    tol = _tolerance_or_default(tolerance)
     return (
         is_green(c1)
         and is_red(c2)
         and is_small(c1, atr)
         and is_small(c2, atr)
         and _similar_bodies(c1, c2)
-        and abs(c1.high - c2.high) <= cfg.TWEEZER_TOLERANCE
+        and abs(c1.high - c2.high) <= tol
     )
 
 
-def morning_star(candles, atr):
+def morning_star(candles, atr, tolerance=None):
     c1, c2, c3 = candles
     return (
         is_red(c1)
@@ -133,7 +149,7 @@ def morning_star(candles, atr):
     )
 
 
-def evening_star(candles, atr):
+def evening_star(candles, atr, tolerance=None):
     c1, c2, c3 = candles
     return (
         is_green(c1)
@@ -178,11 +194,11 @@ def _three_soldiers(candles, atr, bullish):
     return True
 
 
-def three_white_soldiers(candles, atr):
+def three_white_soldiers(candles, atr, tolerance=None):
     return _three_soldiers(candles, atr, bullish=True)
 
 
-def three_black_crows(candles, atr):
+def three_black_crows(candles, atr, tolerance=None):
     return _three_soldiers(candles, atr, bullish=False)
 
 
@@ -197,23 +213,28 @@ def _three_method(candles, atr, bullish):
         return False
     if not (color_outer(c5) and is_long(c5, atr)):
         return False
+    counter = 0
     for m in middle:
-        if not (color_middle(m) and is_small(m, atr)):
+        if color_middle(m):
+            counter += 1
+        if not is_small(m, atr):
             return False
         if cfg.RISEFALL_REQUIRE_INSIDE_RANGE and not (
             m.low >= c1.low and m.high <= c1.high
         ):
             return False
+    if counter < cfg.RISEFALL_MIN_COUNTER_CANDLES:
+        return False
     if bullish:
         return c5.close > c1.close
     return c5.close < c1.close
 
 
-def rising_three_methods(candles, atr):
+def rising_three_methods(candles, atr, tolerance=None):
     return _three_method(candles, atr, bullish=True)
 
 
-def falling_three_methods(candles, atr):
+def falling_three_methods(candles, atr, tolerance=None):
     return _three_method(candles, atr, bullish=False)
 
 
@@ -231,7 +252,7 @@ PATTERNS = (
 )
 
 
-def detect_patterns(df, atr, i=None):
+def detect_patterns(df, atr, i=None, config=None):
     """
     Prüft alle Haupt-Muster, die mit der Kerze i enden.
 
@@ -239,15 +260,19 @@ def detect_patterns(df, atr, i=None):
         df: DataFrame mit open, high, low, close (Index: Zeit)
         atr: Series mit ATR-Werten, gleiche Länge wie df
         i: Position der letzten Kerze des Musters (Standard: letzte Zeile)
+        config: Marktkonfiguration für die Tweezer-Toleranz (Standard: Standardmarkt)
 
     Returns:
         Liste von dicts mit name, signal, required_trend, time
     """
     if i is None:
         i = len(df) - 1
+    if config is None:
+        config = cfg.for_market(cfg.DEFAULT_MARKET)
     atr_value = float(atr.iloc[i])
     if math.isnan(atr_value):
         return []
+    tolerance = tweezer_tolerance(config, atr_value)
 
     found = []
     for p in PATTERNS:
@@ -258,7 +283,7 @@ def detect_patterns(df, atr, i=None):
             Candle(*map(float, df.iloc[k][["open", "high", "low", "close"]]))
             for k in range(start, i + 1)
         ]
-        if p.check(candles, atr_value):
+        if p.check(candles, atr_value, tolerance):
             found.append({
                 "name": p.name,
                 "signal": p.signal,
@@ -285,12 +310,13 @@ def detect(df, config):
     i = len(df) - 1
     last_close = float(df["close"].iloc[i])
     signals = []
-    for hit in detect_patterns(df, atr, i):
+    for hit in detect_patterns(df, atr, i, config):
         n = PATTERN_SIZES[hit["name"]]
         window = df.iloc[i - n + 1:i + 1]
         signals.append(Signal(
             time=hit["time"] + pd.Timedelta(config.INTERVAL),
             symbol=config.SYMBOL,
+            market=getattr(config, "MARKET", None),
             interval=config.INTERVAL,
             source=SOURCE,
             pattern=hit["name"],

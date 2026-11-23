@@ -7,6 +7,7 @@ Kein Blick in die Zukunft: Die Signale einer Kerze entstehen nur aus Daten bis
 einschließlich dieser Kerze. Simuliert wird ab der Kerze nach dem Signal.
 """
 
+import argparse
 import csv
 import logging
 import sys
@@ -38,7 +39,7 @@ FUNNEL_STAGES = ("raw", "trend", "sltp")
 TRADE_STAGES = ("simuliert", "offen", "uebersprungen")
 
 CSV_FIELDS = [
-    "pattern", "direction", "signal_time_utc", "entry", "sl", "tp", "risk_pips", "rr",
+    "market", "pattern", "direction", "signal_time_utc", "entry", "sl", "tp", "risk_pips", "rr",
     "exit_time_utc", "exit_price", "outcome", "r",
 ]
 
@@ -252,55 +253,79 @@ def write_csv(trades, path):
         writer.writeheader()
         for t in trades:
             writer.writerow({
+                "market": t.get("market"),
                 "pattern": t["pattern"],
                 "direction": t["direction"],
                 "signal_time_utc": t["signal_time"].isoformat(),
-                "entry": format_price(t["entry"]),
-                "sl": format_price(t["sl"]),
-                "tp": format_price(t["tp"]),
+                "entry": format_price(t["entry"], t["decimals"]),
+                "sl": format_price(t["sl"], t["decimals"]),
+                "tp": format_price(t["tp"], t["decimals"]),
                 "risk_pips": _fmt(t["risk_pips"], 1),
                 "rr": t["rr"],
                 "exit_time_utc": t["exit_time"].isoformat() if t["exit_time"] is not None else None,
-                "exit_price": format_price(t["exit_price"]),
+                "exit_price": format_price(t["exit_price"], t["decimals"]),
                 "outcome": t["outcome"],
                 "r": _fmt(t["r"], 2),
             })
 
 
-def main(config=default_config, fetch=get_candles):
-    df = fetch(config.SYMBOL, config.INTERVAL, lookback=None, period=config.BACKTEST_PERIOD)
-    if df is None or len(df) == 0:
-        print("Keine Kerzen erhalten, Backtest abgebrochen.")
-        return 1
-    df = remove_incomplete_candle(df, config.INTERVAL)
-
-    trades, funnel = run_backtest(df, config)
+def _print_report(df, cfg, trades, funnel):
     main_rows, main_total = summarize(trades, MAIN_PATTERN_NAMES)
     single_rows, single_total = summarize(trades, SINGLE_PATTERN_NAMES)
-    evaluated_candles = len(range(first_position(config), len(df) - 1))
-    info = (
+    evaluated_candles = len(range(first_position(cfg), len(df) - 1))
+    print(f"=== {cfg.DISPLAY_SYMBOL} ({cfg.MARKET}) ===")
+    print(
         f"Zeitraum: {df.index[0].isoformat()} bis {df.index[-1].isoformat()} (UTC)\n"
         f"Kerzen geladen: {len(df)}, davon ausgewertet: {evaluated_candles} "
-        f"(Warmlauf {first_position(config)})"
+        f"(Warmlauf {first_position(cfg)})"
     )
-    print(info)
     print()
-    print(render_table(main_rows, main_total, config, "Haupt-Muster"))
+    print(render_table(main_rows, main_total, cfg, "Haupt-Muster"))
     print()
-    print(render_table(single_rows, single_total, config,
+    print(render_table(single_rows, single_total, cfg,
                        "Einzelkerzen (Hintergrund, NEUTRAL nur gezählt, nicht bewertet)"))
     print(f"\noffen: {open_count(trades)} (Haltefenster reicht über das Datenende, nicht in der Statistik)")
     print()
     print(render_funnel(funnel, MAIN_PATTERN_NAMES, "Trichter Haupt-Muster (Kerzen mit Treffer, nicht Trades)"))
     print()
     print(render_funnel(funnel, SINGLE_PATTERN_NAMES, "Trichter Einzelkerzen (Hintergrund)"))
+    print()
 
-    path = BASE_DIR / config.BACKTEST_CSV_FILE
-    write_csv(trades, path)
-    print(f"\nEinzelsignale: {path}")
-    return 0
+
+def main(markets=None, fetch=get_candles, csv_path=None):
+    """Backtest je Markt. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte."""
+    names = list(markets) if markets else list(default_config.MARKETS)
+    status = 0
+    all_trades = []
+    for name in names:
+        cfg = default_config.for_market(name)
+        df = fetch(cfg.SYMBOL, cfg.INTERVAL, lookback=None, period=cfg.BACKTEST_PERIOD)
+        if df is None or len(df) == 0:
+            print(f"[{cfg.MARKET}] Keine Kerzen erhalten, Backtest für diesen Markt übersprungen.\n")
+            status = 1
+            continue
+        df = remove_incomplete_candle(df, cfg.INTERVAL)
+        trades, funnel = run_backtest(df, cfg)
+        for trade in trades:
+            trade["market"] = cfg.MARKET
+            trade["decimals"] = cfg.PRICE_DECIMALS
+        all_trades.extend(trades)
+        _print_report(df, cfg, trades, funnel)
+
+    path = csv_path or BASE_DIR / default_config.BACKTEST_CSV_FILE
+    write_csv(all_trades, path)
+    print(f"Einzelsignale: {path}")
+    return status
+
+
+def cli(argv=None):
+    parser = argparse.ArgumentParser(description="Backtest der Muster je Markt")
+    parser.add_argument("--market", choices=sorted(default_config.MARKETS),
+                        help="Nur ein Markt (Standard: alle)")
+    args = parser.parse_args(argv)
+    return main(markets=[args.market] if args.market else None)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.WARNING)
-    sys.exit(main())
+    sys.exit(cli())

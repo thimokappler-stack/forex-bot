@@ -15,14 +15,14 @@ def test_parse_at_mit_z_suffix():
 
 def test_main_exit_0_bei_normalem_lauf(monkeypatch):
     calls = []
-    monkeypatch.setattr(main_module, "run", lambda at=None: calls.append(at) or {})
+    monkeypatch.setattr(main_module, "run", lambda at=None, **kwargs: calls.append(at) or {})
     assert main_module.main([]) == 0
     assert calls == [None]
 
 
 def test_main_gibt_at_an_run_weiter(monkeypatch):
     calls = []
-    monkeypatch.setattr(main_module, "run", lambda at=None: calls.append(at) or {})
+    monkeypatch.setattr(main_module, "run", lambda at=None, **kwargs: calls.append(at) or {})
     assert main_module.main(["--at", "2026-11-20T12:30:00Z"]) == 0
     assert calls == [pd.Timestamp("2026-11-20 12:30", tz="UTC")]
 

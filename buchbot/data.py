@@ -11,18 +11,18 @@ Funktionen:
 import logging
 import pandas as pd
 import yfinance as yf
-from buchbot.config import SYMBOL, INTERVAL, LOOKBACK_CANDLES, ATR_PERIOD, TREND_EMA_PERIOD
+from buchbot.config import MARKETS, DEFAULT_MARKET, INTERVAL, LOOKBACK_CANDLES, ATR_PERIOD, TREND_EMA_PERIOD
 
 
 logger = logging.getLogger(__name__)
 
 
-def get_candles(symbol=SYMBOL, interval=INTERVAL, lookback=LOOKBACK_CANDLES, period="5d"):
+def get_candles(symbol=None, interval=INTERVAL, lookback=LOOKBACK_CANDLES, period="5d"):
     """
     Holt die letzten `lookback` geschlossenen 15m-Kerzen von yfinance.
     
     Args:
-        symbol: yfinance Symbol (z.B. "EURUSD=X")
+        symbol: yfinance Symbol (z.B. "EURUSD=X"). None = Symbol des Standardmarktes.
         interval: Kerzenlänge (z.B. "15m")
         lookback: Anzahl Kerzen zum Abholen
     
@@ -34,6 +34,7 @@ def get_candles(symbol=SYMBOL, interval=INTERVAL, lookback=LOOKBACK_CANDLES, per
     - Die zuletzt geholte Kerze könnte noch offen sein.
     - Wird später in main.py verworfen via remove_incomplete_candle()
     """
+    symbol = symbol or MARKETS[DEFAULT_MARKET]["symbol"]
     try:
         logger.info(f"Hole Kerzen: {symbol} {interval} lookback={lookback}")
         df = yf.download(

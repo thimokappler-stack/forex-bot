@@ -8,10 +8,12 @@ import logging
 
 import pandas as pd
 
-import buchbot.config as cfg
+from buchbot import config as base_config
 from buchbot.detectors import candles_main
 from buchbot.detectors.candles_main import Candle
 from buchbot.filters import trend
+
+cfg = base_config.for_market("EURUSD")
 
 
 FLAT = Candle(1.1000, 1.1005, 1.0995, 1.1000)

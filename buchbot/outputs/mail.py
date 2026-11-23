@@ -30,13 +30,13 @@ def build_subject(signals, config):
     return f"{SUBJECT_PREFIX} {direction} {config.DISPLAY_SYMBOL} – {len(signals)} Muster ({interval})"
 
 
-def _price(value):
-    formatted = format_price(value)
+def _price(value, decimals):
+    formatted = format_price(value, decimals)
     return "–" if formatted is None else formatted
 
 
-def _pips(value):
-    return "–" if value is None else f"{value:.1f} Pips"
+def _pips(value, unit):
+    return "–" if value is None else f"{value:.1f} {unit}"
 
 
 def _ratio(value):
@@ -53,10 +53,10 @@ def build_body(signals, config):
             f"Muster: {signal.pattern}",
             f"Kerzenschluss: {close.strftime('%Y-%m-%d %H:%M')} UTC / "
             f"{close.tz_convert(tz).strftime('%Y-%m-%d %H:%M %Z')}",
-            f"Einstieg: {_price(signal.entry)}",
-            f"Stop-Loss: {_price(signal.sl)}",
-            f"Take-Profit: {_price(signal.tp)}",
-            f"Risiko: {_pips(signal.risk_pips)}",
+            f"Einstieg: {_price(signal.entry, config.PRICE_DECIMALS)}",
+            f"Stop-Loss: {_price(signal.sl, config.PRICE_DECIMALS)}",
+            f"Take-Profit: {_price(signal.tp, config.PRICE_DECIMALS)}",
+            f"Risiko: {_pips(signal.risk_pips, config.RISK_UNIT)}",
             f"CRV: {_ratio(signal.rr)}",
         ]
         if signal.tags.get("prior_candle"):
@@ -74,20 +74,40 @@ def build_message(signals, config, sender, recipient):
     return msg
 
 
-def send_bundle(signals, config):
-    """Sendet eine Mail für die Signale einer Kerze. Wirft Fehler weiter."""
+def _credentials():
     user = os.environ.get("MAIL_USER")
     password = os.environ.get("MAIL_APP_PASSWORD")
     recipient = os.environ.get("MAIL_TO")
     if not (user and password and recipient):
         raise RuntimeError("MAIL_USER, MAIL_APP_PASSWORD oder MAIL_TO fehlt in der .env")
+    return user, password, recipient
 
-    msg = build_message(signals, config, sender=user, recipient=recipient)
+
+def _deliver(msg, config, user, password):
     with smtplib.SMTP_SSL(config.MAIL_SMTP_HOST, config.MAIL_SMTP_PORT,
                           timeout=config.MAIL_TIMEOUT_SECONDS) as smtp:
         smtp.login(user, password)
         smtp.send_message(msg)
+
+
+def send_bundle(signals, config):
+    """Sendet eine Mail für die Signale einer Kerze. Wirft Fehler weiter."""
+    user, password, recipient = _credentials()
+    msg = build_message(signals, config, sender=user, recipient=recipient)
+    _deliver(msg, config, user, password)
     logger.info("Mail gesendet: %s", msg["Subject"])
+
+
+def send_test_mail(config):
+    """Sendet eine Testmail. Ändert weder Zustand noch CSV. Wirft Fehler weiter."""
+    user, password, recipient = _credentials()
+    msg = EmailMessage()
+    msg["Subject"] = f"{SUBJECT_PREFIX} Testmail"
+    msg["From"] = user
+    msg["To"] = recipient
+    msg.set_content("Testmail des Signalbots. Es wurde kein Signal ausgewertet.\n", charset="utf-8")
+    _deliver(msg, config, user, password)
+    logger.info("Testmail gesendet")
 
 
 def send_notifications(signals, config):

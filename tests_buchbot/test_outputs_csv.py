@@ -24,7 +24,7 @@ def make_signal(pattern="Morning Star", time="2026-05-06 10:15"):
         time=pd.Timestamp(time, tz="UTC"), symbol="EURUSD=X", interval="15m",
         source="candles_main", pattern=pattern, direction="BUY",
         entry=1.1010, atr=0.001, sl=1.0995, tp=1.1040, risk_pips=15.0, rr=2.0,
-        mode="log_only",
+        mode="log_only", market="EURUSD",
         tags={"required_trend": "down", "n_candles": 3,
               "pattern_low": 1.0990, "pattern_high": 1.1030},
     )
@@ -43,7 +43,7 @@ def test_kopfzeile_nur_einmal_beim_anlegen(tmp_path):
 
     rows = read_rows(path)
     assert rows[0] == log_csv.COLUMNS
-    assert sum(1 for row in rows if row and row[0] == "time") == 1
+    assert sum(1 for row in rows if row and row[0] == "market") == 1
     assert len(rows) == 3
 
 
@@ -93,7 +93,7 @@ def test_csv_mit_einem_signal_hat_kopf_und_eine_datenzeile(tmp_path):
 
     lines = path.read_text(encoding="utf-8-sig").splitlines()
     assert len(lines) == 2
-    assert lines[0].startswith("time;symbol;")
+    assert lines[0].startswith("market;time;symbol;")
     columns = lines[0].split(";")
     values = lines[1].split(";")
     assert values[columns.index("risk_pips")] == "6.2"

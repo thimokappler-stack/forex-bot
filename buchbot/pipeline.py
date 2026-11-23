@@ -8,6 +8,7 @@ Mail noch CSV-Eintrag noch Änderung am Duplikat-Schutz.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -15,6 +16,7 @@ import pandas as pd
 from buchbot import config as default_config
 from buchbot import sltp
 from buchbot import state as state_store
+from buchbot.config import LOG_ONLY_DETECTORS, MARKETS, read_settings
 from buchbot.data import get_candles, remove_incomplete_candle
 from buchbot.detectors import run_detectors
 from buchbot.filters import trend
@@ -33,7 +35,9 @@ def _minute_of_week(day_hour):
 
 
 def is_market_open(now, config):
-    """Forex ist von MARKET_CLOSED_FROM bis MARKET_CLOSED_UNTIL (UTC) geschlossen."""
+    """Forex ist von MARKET_CLOSED_FROM bis MARKET_CLOSED_UNTIL (UTC) geschlossen. "24_7" hat keine Pause."""
+    if getattr(config, "HOURS", "forex") == "24_7":
+        return True
     now = to_utc(now)
     minute_of_week = now.weekday() * 1440 + now.hour * 60 + now.minute
     closed_from = _minute_of_week(config.MARKET_CLOSED_FROM)
@@ -55,17 +59,8 @@ def detect_window(df, config):
     return signals
 
 
-def run(at=None, now=None, config=default_config, fetch=get_candles,
-        state_path=None, csv_path=None):
-    """Führt einen Lauf aus und gibt eine Zusammenfassung zurück."""
-    dry_run = at is not None
-    if dry_run:
-        now = to_utc(at)
-    elif now is None:
-        now = pd.Timestamp.now(tz="UTC")
-    else:
-        now = to_utc(now)
-
+def run_market(config, now, dry_run, fetch=get_candles, state_path=None, csv_path=None):
+    """Wertet einen Markt aus. `config` ist eine Marktkonfiguration aus config.for_market."""
     state_path = state_path or BASE_DIR / config.STATE_FILE
     csv_path = csv_path or BASE_DIR / config.SIGNALS_CSV_FILE
     summary = {"signals": 0, "new": 0, "mailed": 0, "dry_run": dry_run}
@@ -114,27 +109,57 @@ def run(at=None, now=None, config=default_config, fetch=get_candles,
     if not new:
         return summary
 
-    log_csv.log_signals(new)
+    log_csv.log_signals(new, config)
     if dry_run:
         logger.info("Probelauf mit --at: keine Mail, kein CSV-Eintrag, kein Zustandswechsel")
         return summary
 
-    failed_ids = set()
-    notify = [s for s in new if s.mode == "notify"]
-    if notify and config.NOTIFY_ENABLED:
+    # Signale im Modus notify, die nicht gemailt werden (Schalter aus oder Versand fehlgeschlagen),
+    # bleiben ungeloggt und ungemerkt, damit sie in einem späteren Lauf gesendet werden können.
+    notify = [s for s in new if s.mode == "notify" and s.source not in LOG_ONLY_DETECTORS]
+    deferred_ids = set()
+    if notify and not config.NOTIFY_ENABLED:
+        logger.info("[%s] Mail deaktiviert: %d Signal(e) werden zurückgestellt", config.MARKET, len(notify))
+        deferred_ids = {id(s) for s in notify}
+    elif notify:
         sent = mail.send_notifications(notify, config)
         summary["mailed"] = len(sent)
         sent_ids = {id(s) for s in sent}
-        failed_ids = {id(s) for s in notify if id(s) not in sent_ids}
-    elif notify:
-        logger.info("Mail deaktiviert (NOTIFY_ENABLED=False): %d Signal(e) nicht gesendet", len(notify))
+        deferred_ids = {id(s) for s in notify if id(s) not in sent_ids}
 
-    handled = [s for s in new if id(s) not in failed_ids]
-    log_csv.append_signals(handled, df, config.INTERVAL, csv_path)
+    handled = [s for s in new if id(s) not in deferred_ids]
+    log_csv.append_signals(handled, df, config.INTERVAL, csv_path, config)
     for signal in handled:
         state_store.mark_sent(state, state_store.signal_key(signal), now)
     state_store.save_state(state_path, state, now, config.STATE_RETENTION_DAYS)
 
-    logger.info("Lauf beendet: %d verarbeitet, %d per Mail gesendet, %d Mail(s) fehlgeschlagen",
-                len(handled), summary["mailed"], len(failed_ids))
+    logger.info("[%s] Lauf beendet: %d verarbeitet, %d per Mail gesendet, %d zurückgestellt",
+                config.MARKET, len(handled), summary["mailed"], len(deferred_ids))
     return summary
+
+
+def run(at=None, now=None, fetch=get_candles, state_path=None, csv_path=None,
+        settings=None, markets=None):
+    """Wertet alle Märkte nacheinander aus. Ein Fehler in einem Markt stoppt die anderen nicht.
+
+    Gibt ein Dict {markt: zusammenfassung} zurück. Unerwartete Fehler stehen im Schlüssel "error".
+    """
+    dry_run = at is not None
+    if dry_run:
+        now = to_utc(at)
+    elif now is None:
+        now = pd.Timestamp.now(tz="UTC")
+    else:
+        now = to_utc(now)
+
+    settings = settings if settings is not None else read_settings(os.environ)
+    names = markets or list(MARKETS)
+    results = {}
+    for name in names:
+        config = default_config.for_market(name, settings)
+        try:
+            results[name] = run_market(config, now, dry_run, fetch, state_path, csv_path)
+        except Exception as exc:  # ein Markt darf die anderen nicht stoppen
+            logger.exception("[%s] Unerwarteter Fehler: %s", name, exc)
+            results[name] = {"error": str(exc)}
+    return results

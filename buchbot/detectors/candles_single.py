@@ -142,6 +142,7 @@ def detect(df, config):
         signals.append(Signal(
             time=df.index[i] + pd.Timedelta(config.INTERVAL),
             symbol=config.SYMBOL,
+            market=getattr(config, "MARKET", None),
             interval=config.INTERVAL,
             source=SOURCE,
             pattern=p.name,

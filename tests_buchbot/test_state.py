@@ -12,13 +12,20 @@ def make_signal(time="2026-05-06 10:00", pattern="Morning Star"):
     return Signal(
         time=pd.Timestamp(time, tz="UTC"), symbol="EURUSD=X", interval="15m",
         source="candles_main", pattern=pattern, direction="BUY",
-        entry=1.1, atr=0.001,
+        entry=1.1, atr=0.001, market="EURUSD",
     )
 
 
-def test_signal_key_enthaelt_symbol_muster_und_kerzenzeit():
+def test_signal_key_enthaelt_markt_symbol_muster_und_kerzenzeit():
     key = state.signal_key(make_signal())
-    assert key == "EURUSD=X|Morning Star|2026-05-06T10:00:00+00:00"
+    assert key == "EURUSD|EURUSD=X|Morning Star|2026-05-06T10:00:00+00:00"
+
+
+def test_gleiches_signal_in_verschiedenen_maerkten_hat_verschiedene_schluessel():
+    eur = make_signal()
+    gbp = make_signal()
+    gbp.market = "GBPUSD"
+    assert state.signal_key(eur) != state.signal_key(gbp)
 
 
 def test_fehlende_datei_ergibt_leeren_zustand(tmp_path):
