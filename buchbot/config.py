@@ -48,54 +48,55 @@ MARKETS = {
         "price_decimals": 5, "detectors": None,
         "interval": "30m", "observe_only": True,
     },
-    # Beobachtungsmärkte: nur Auswertung und CSV, nie Mail (nicht in BUCH_NOTIFY_MARKETS genannt).
+    # Beobachtungsmärkte (Standard in OBSERVE_ONLY_MARKETS): nur Auswertung und CSV, keine Mail.
     # Mindestabstand und Spread sind Startwerte und in dieser Datei änderbar.
     "USDJPY": {
         "display": "USD/JPY", "symbol": "USDJPY=X", "hours": "forex",
         "pip_size": 0.01, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.0,
         "tweezer_tolerance": 0.015, "tweezer_atr_fraction": None,
-        "price_decimals": 3, "detectors": None, "observe_only": True,
+        "price_decimals": 3, "detectors": None,
     },
     "AUDUSD": {
         "display": "AUD/USD", "symbol": "AUDUSD=X", "hours": "forex",
-        "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.0,
+        "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 3, "spread_pips": 1.0,
         "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
-        "price_decimals": 5, "detectors": None, "observe_only": True,
+        "price_decimals": 5, "detectors": None,
     },
     "GBPJPY": {
         "display": "GBP/JPY", "symbol": "GBPJPY=X", "hours": "forex",
         "pip_size": 0.01, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 2.0,
         "tweezer_tolerance": 0.015, "tweezer_atr_fraction": None,
-        "price_decimals": 3, "detectors": None, "observe_only": True,
+        "price_decimals": 3, "detectors": None,
     },
     "USDCAD": {
         "display": "USD/CAD", "symbol": "USDCAD=X", "hours": "forex",
         "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.5,
         "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
-        "price_decimals": 5, "detectors": None, "observe_only": True,
+        "price_decimals": 5, "detectors": None,
     },
     "USDCHF": {
         "display": "USD/CHF", "symbol": "USDCHF=X", "hours": "forex",
         "pip_size": 0.0001, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.5,
         "tweezer_tolerance": 0.00015, "tweezer_atr_fraction": None,
-        "price_decimals": 5, "detectors": None, "observe_only": True,
+        "price_decimals": 5, "detectors": None,
     },
     "EURJPY": {
         "display": "EUR/JPY", "symbol": "EURJPY=X", "hours": "forex",
         "pip_size": 0.01, "risk_unit": "Pips", "min_sl_pips": 5, "spread_pips": 1.5,
         "tweezer_tolerance": 0.015, "tweezer_atr_fraction": None,
-        "price_decimals": 3, "detectors": None, "observe_only": True,
+        "price_decimals": 3, "detectors": None,
     },
     # Gold als Future (GC=F): XAUUSD=X liefert bei yfinance keine Daten.
     "GOLD": {
         "display": "Gold", "symbol": "GC=F", "hours": "futures_gold",
         "pip_size": 1.0, "risk_unit": "USD", "min_sl_pips": 2, "spread_pips": 0.5,
         "tweezer_tolerance": None, "tweezer_atr_fraction": 0.15,
-        "price_decimals": 2, "detectors": None, "observe_only": True,
+        "price_decimals": 2, "detectors": None,
     },
 }
 DEFAULT_MARKET = "EURUSD"
-# "interval" je Markt in MARKETS, fehlt er, gilt INTERVAL. "observe_only": nie Mail, Detektoren nur log_only.
+# "interval" je Markt in MARKETS, fehlt er, gilt INTERVAL.
+# "observe_only" in MARKETS ist fest (EURUSD_30M): nie Mail. Die übrigen Beobachtungsmärkte kommen aus OBSERVE_ONLY_MARKETS.
 
 # === DATENQUELLE ===
 INTERVAL = "15m"              # Kerzenlänge (Standard, je Markt überschreibbar)
@@ -181,14 +182,31 @@ BACKTEST_CSV_FILE = "backtest_results.csv"  # Einzelsignale, relativ zum Projekt
 # Detektoren, die nie per Mail laufen dürfen (Hintergrund-Analyse)
 LOG_ONLY_DETECTORS = ("candles_single",)
 DETECTOR_MODES = ("off", "log_only", "notify")
+# Beobachtungsmärkte mit Standard-Liste. Überschreibbar per .env: BUCH_OBSERVE_ONLY_MARKETS (vollständige Liste, leer = keine).
+OBSERVE_ONLY_MARKETS = ("USDJPY", "AUDUSD", "GBPJPY", "USDCAD", "USDCHF", "EURJPY", "GOLD")
 
 
 class SettingsError(ValueError):
     """Ungültiger Wert in den Einstellungen (.env)."""
 
 
+def _parse_markets(raw, variable):
+    names = []
+    for name in raw.split(","):
+        name = name.strip().upper()
+        if not name:
+            continue
+        if name not in MARKETS:
+            raise SettingsError(
+                f"{variable}: unbekannter Markt '{name}' "
+                f"(erlaubt: {', '.join(MARKETS)})"
+            )
+        names.append(name)
+    return tuple(names)
+
+
 def read_settings(environ):
-    """Liest BUCH_NOTIFY_ENABLED, BUCH_NOTIFY_MARKETS und BUCH_DETECTOR_MODES."""
+    """Liest BUCH_NOTIFY_ENABLED, BUCH_NOTIFY_MARKETS, BUCH_OBSERVE_ONLY_MARKETS und BUCH_DETECTOR_MODES."""
     enabled_raw = environ.get("BUCH_NOTIFY_ENABLED", "").strip().lower()
     if enabled_raw == "":
         notify_enabled = NOTIFY_ENABLED
@@ -202,17 +220,11 @@ def read_settings(environ):
             "(erlaubt: 1, true, yes, 0, false, no)"
         )
 
-    notify_markets = []
-    for name in environ.get("BUCH_NOTIFY_MARKETS", "").split(","):
-        name = name.strip().upper()
-        if not name:
-            continue
-        if name not in MARKETS:
-            raise SettingsError(
-                f"BUCH_NOTIFY_MARKETS: unbekannter Markt '{name}' "
-                f"(erlaubt: {', '.join(MARKETS)})"
-            )
-        notify_markets.append(name)
+    notify_markets = _parse_markets(environ.get("BUCH_NOTIFY_MARKETS", ""), "BUCH_NOTIFY_MARKETS")
+    if "BUCH_OBSERVE_ONLY_MARKETS" in environ:
+        observe_markets = _parse_markets(environ["BUCH_OBSERVE_ONLY_MARKETS"], "BUCH_OBSERVE_ONLY_MARKETS")
+    else:
+        observe_markets = OBSERVE_ONLY_MARKETS
 
     detector_modes = {}
     for item in environ.get("BUCH_DETECTOR_MODES", "").split(","):
@@ -242,7 +254,8 @@ def read_settings(environ):
 
     return {
         "notify_enabled": notify_enabled,
-        "notify_markets": tuple(notify_markets),
+        "notify_markets": notify_markets,
+        "observe_only_markets": observe_markets,
         "detector_modes": detector_modes,
     }
 
@@ -276,7 +289,8 @@ def for_market(name, settings=None):
     minutes = INTERVAL_MINUTES[cfg.INTERVAL]
     cfg.STALE_MAX_MINUTES = STALE_CANDLES * minutes
     cfg.MAX_HOLD_CANDLES = market.get("max_hold_candles", MAX_HOLD_CANDLES)
-    cfg.OBSERVE_ONLY = market.get("observe_only", False)
+    cfg.OBSERVE_ONLY = (market.get("observe_only", False)
+                        or name in settings.get("observe_only_markets", OBSERVE_ONLY_MARKETS))
     cfg.DETECTORS = {**DETECTORS, **(market["detectors"] or {}), **settings["detector_modes"]}
     if cfg.OBSERVE_ONLY:
         cfg.DETECTORS = {key: ("off" if mode == "off" else "log_only") for key, mode in cfg.DETECTORS.items()}

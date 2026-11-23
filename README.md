@@ -210,7 +210,7 @@ Für Krypto ist die Risikoeinheit USD statt Pips, und die Preise werden auf 2 Na
 
 ### Beobachtungsmärkte
 
-Diese Märkte werden ausgewertet, geloggt und in `signals_log.csv` geschrieben, sie senden aber **nie** eine Mail, auch nicht bei `BUCH_NOTIFY_ENABLED=1`. Sie stehen nicht in `BUCH_NOTIFY_MARKETS`, und das bleibt der Standard.
+Diese Märkte werden ausgewertet, geloggt und in `signals_log.csv` geschrieben. Sie senden standardmäßig **keine** Mail, auch nicht bei `BUCH_NOTIFY_ENABLED=1` und auch nicht, wenn sie in `BUCH_NOTIFY_MARKETS` stehen. Welche Märkte Beobachtungsmärkte sind, steuert `BUCH_OBSERVE_ONLY_MARKETS` in der `.env`. Der Standard sind alle Märkte der Tabelle außer `EURUSD_30M`. `EURUSD_30M` ist fest und sendet nie eine Mail.
 
 | Markt-Schlüssel | Anzeige | yfinance-Symbol | Intervall | Handelszeiten |
 |---|---|---|---|---|
@@ -226,10 +226,20 @@ Diese Märkte werden ausgewertet, geloggt und in `signals_log.csv` geschrieben, 
 - Gold nutzt `GC=F` (Future). Das Spot-Symbol `XAUUSD=X` liefert bei yfinance keine Daten.
 - Gold ist Freitag 17:00 bis Sonntag 18:00 New Yorker Zeit geschlossen, außerdem täglich Montag bis Donnerstag 17:00 bis 18:00 New Yorker Zeit. Feiertage sind nicht berücksichtigt.
 - Yen-Paare haben Pip 0.01, die übrigen Forex-Paare 0.0001. Gold rechnet in USD.
-- Die Startwerte für Mindestabstand und Spread stehen in `config.py` und sind Annahmen.
-- Einen Beobachtungsmarkt später per Mail freischalten: Markt-Schlüssel in `BUCH_NOTIFY_MARKETS` eintragen, zum Beispiel `BUCH_NOTIFY_MARKETS=EURUSD,USDJPY`, und `BUCH_NOTIFY_ENABLED=1` setzen. Für `EURUSD_30M` hat das keine Wirkung, dieser Markt sendet nie Mails.
+- Mindestabstand und Spread stehen je Markt in `config.py` und sind Startwerte. AUDUSD hat 3 Pips Mindestabstand, weil der Median-ATR dort nur etwa 3.1 Pips beträgt.
+- **Mail für einen Beobachtungsmarkt einschalten** braucht zwei Schritte in der `.env`:
+  1. Den Markt aus `BUCH_OBSERVE_ONLY_MARKETS` entfernen. Die Liste ist vollständig und ersetzt den Standard. Eine leere Liste hebt alle Beobachtungsmärkte außer `EURUSD_30M` auf.
+  2. Den Markt in `BUCH_NOTIFY_MARKETS` eintragen und `BUCH_NOTIFY_ENABLED=1` setzen.
 
-Abrufe laufen mit einer Pause von `MARKET_PAUSE_SECONDS` (1 s) zwischen den Märkten. Schlägt ein Abruf fehl oder liefert er eine leere Antwort, wird nach `FETCH_RETRY_SECONDS` (5 s) einmal wiederholt.
+  Beispiel: USDJPY soll Mails senden, die übrigen Beobachtungsmärkte bleiben wie bisher:
+  ```bash
+  BUCH_OBSERVE_ONLY_MARKETS=AUDUSD,GBPJPY,USDCAD,USDCHF,EURJPY,GOLD
+  BUCH_NOTIFY_MARKETS=USDJPY
+  BUCH_NOTIFY_ENABLED=1
+  ```
+  Ohne Schritt 1 bleibt der Markt Beobachtungsmarkt, und `BUCH_NOTIFY_MARKETS` allein hat keine Wirkung. `EURUSD_30M` lässt sich nicht freischalten.
+
+Abrufe laufen mit einer Pause von `MARKET_PAUSE_SECONDS` (1 s) zwischen den Märkten. Schlägt ein Abruf fehl oder liefert er eine leere Antwort, wird nach `FETCH_RETRY_SECONDS` (5 s) einmal wiederholt. mit einer Pause von `MARKET_PAUSE_SECONDS` (1 s) zwischen den Märkten. Schlägt ein Abruf fehl oder liefert er eine leere Antwort, wird nach `FETCH_RETRY_SECONDS` (5 s) einmal wiederholt.
 
 ### Umstellung vom alten auf den neuen Bot
 

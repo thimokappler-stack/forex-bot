@@ -7,7 +7,7 @@ import pytest
 
 from buchbot import config as default_config
 from buchbot import pipeline, sltp
-from buchbot.config import read_settings, for_market
+from buchbot.config import read_settings, for_market, SettingsError
 from buchbot.models import Signal
 from buchbot.outputs.mail import build_body
 
@@ -18,7 +18,7 @@ NEUE_MAERKTE = ["USDJPY", "AUDUSD", "GBPJPY", "USDCAD", "USDCHF", "EURJPY", "GOL
 # Markt, Symbol, Pip-Größe, Nachkommastellen, Mindestabstand, Spread, Tweezer absolut, Tweezer ATR-Anteil, Handelszeiten, Einheit
 TABELLE = [
     ("USDJPY", "USDJPY=X", 0.01, 3, 5, 1.0, 0.015, None, "forex", "Pips"),
-    ("AUDUSD", "AUDUSD=X", 0.0001, 5, 5, 1.0, 0.00015, None, "forex", "Pips"),
+    ("AUDUSD", "AUDUSD=X", 0.0001, 5, 3, 1.0, 0.00015, None, "forex", "Pips"),
     ("GBPJPY", "GBPJPY=X", 0.01, 3, 5, 2.0, 0.015, None, "forex", "Pips"),
     ("USDCAD", "USDCAD=X", 0.0001, 5, 5, 1.5, 0.00015, None, "forex", "Pips"),
     ("USDCHF", "USDCHF=X", 0.0001, 5, 5, 1.5, 0.00015, None, "forex", "Pips"),
@@ -113,6 +113,37 @@ def test_neue_maerkte_ignorieren_mail_auch_wenn_in_notify_markets(name):
     cfg = for_market(name, settings)
     assert cfg.NOTIFY_ENABLED is False
     assert cfg.NOTIFY_IGNORED is True
+
+
+def test_standard_beobachtungsmaerkte_sind_die_sieben_neuen():
+    assert read_settings({})["observe_only_markets"] == tuple(NEUE_MAERKTE)
+
+
+def test_observe_liste_in_env_schaltet_mail_fuer_einen_markt_frei():
+    settings = read_settings({"BUCH_NOTIFY_ENABLED": "1", "BUCH_NOTIFY_MARKETS": "USDJPY",
+                              "BUCH_OBSERVE_ONLY_MARKETS": "AUDUSD"})
+    usdjpy = for_market("USDJPY", settings)
+    assert usdjpy.OBSERVE_ONLY is False
+    assert usdjpy.NOTIFY_ENABLED is True
+    assert usdjpy.NOTIFY_IGNORED is False
+    audusd = for_market("AUDUSD", settings)
+    assert audusd.OBSERVE_ONLY is True
+    assert audusd.NOTIFY_ENABLED is False
+
+
+def test_leere_observe_liste_hebt_alle_neuen_auf_eurusd_30m_bleibt_fest():
+    settings = read_settings({"BUCH_NOTIFY_ENABLED": "1", "BUCH_NOTIFY_MARKETS": "GOLD,EURUSD_30M",
+                              "BUCH_OBSERVE_ONLY_MARKETS": ""})
+    assert settings["observe_only_markets"] == ()
+    assert for_market("GOLD", settings).NOTIFY_ENABLED is True
+    fest = for_market("EURUSD_30M", settings)
+    assert fest.OBSERVE_ONLY is True
+    assert fest.NOTIFY_ENABLED is False
+
+
+def test_observe_liste_mit_unbekanntem_markt_gibt_fehler():
+    with pytest.raises(SettingsError, match="BUCH_OBSERVE_ONLY_MARKETS"):
+        read_settings({"BUCH_OBSERVE_ONLY_MARKETS": "XYZ"})
 
 
 @pytest.mark.parametrize("ortszeit,offen", [
