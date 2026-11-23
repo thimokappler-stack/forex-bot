@@ -1,0 +1,163 @@
+import csv
+from types import SimpleNamespace
+
+import pandas as pd
+import pytest
+
+from buchbot import backtest
+from buchbot import config as default_config
+from buchbot import evaluate
+from buchbot.models import Signal
+
+
+SIGNAL_FIELDS = ["time", "symbol", "interval", "source", "pattern", "direction",
+                 "entry", "atr", "sl", "tp", "risk_pips", "rr", "mode"]
+
+
+def make_config(**overrides):
+    values = {k: getattr(default_config, k) for k in dir(default_config) if k.isupper()}
+    values["MAX_HOLD_CANDLES"] = 1
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def make_df(rows):
+    index = pd.date_range("2026-01-05 10:00", periods=len(rows), freq="15min", tz="UTC")
+    return pd.DataFrame(rows, index=index, columns=["open", "high", "low", "close"])
+
+
+def candle(high, low, close=None):
+    close = (high + low) / 2 if close is None else close
+    return [close, high, low, close]
+
+
+def signal_row(**overrides):
+    """Eine CSV-Zeile: Signalkerze 10:00 UTC, Schlusszeit 10:15 UTC, BUY Entry 1.1000, SL 1.0980, TP 1.1040."""
+    row = {
+        "time": "2026-01-05T10:15:00+00:00", "symbol": "EURUSD=X", "interval": "15m",
+        "source": "candles_main", "pattern": "Bullish Engulfing", "direction": "BUY",
+        "entry": "1.10000", "atr": "0.00100", "sl": "1.09800", "tp": "1.10400",
+        "risk_pips": "20.0", "rr": "2.0", "mode": "log_only",
+    }
+    row.update(overrides)
+    return row
+
+
+def write_csv(path, rows, fields=SIGNAL_FIELDS):
+    with open(path, "w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, delimiter=";", extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def evaluate_one(df, config, **overrides):
+    trades = evaluate.evaluate_rows([signal_row(**overrides)], df, config)
+    assert len(trades) == 1
+    return trades[0]
+
+
+def test_tp_hit_in_next_candle():
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1045, 1.1000)])
+    trade = evaluate_one(df, make_config())
+    assert trade["outcome"] == backtest.OUTCOME_TP
+    assert trade["r"] == pytest.approx(1.95)
+
+
+def test_sl_hit_in_next_candle():
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1010, 1.0975), candle(1.1020, 1.1000)])
+    trade = evaluate_one(df, make_config())
+    assert trade["outcome"] == backtest.OUTCOME_SL
+    assert trade["r"] == pytest.approx(-1.05)
+
+
+def test_sl_wins_when_sl_and_tp_in_same_candle():
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1045, 1.0975)])
+    trade = evaluate_one(df, make_config())
+    assert trade["outcome"] == backtest.OUTCOME_SL
+    assert trade["r"] == pytest.approx(-1.05)
+
+
+def test_timeout_closes_at_last_hold_candle_close():
+    df = make_df([
+        candle(1.1005, 1.0995, 1.1000),
+        candle(1.1005, 1.0995, 1.1002),
+        candle(1.1012, 1.1000, 1.1010),
+    ])
+    trade = evaluate_one(df, make_config(MAX_HOLD_CANDLES=2))
+    assert trade["outcome"] == backtest.OUTCOME_TIMEOUT
+    assert trade["exit_price"] == pytest.approx(1.1010)
+    assert trade["r"] == pytest.approx(0.45)
+
+
+def test_open_when_hold_window_extends_past_data():
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1010, 1.1000)])
+    trade = evaluate_one(df, make_config(MAX_HOLD_CANDLES=2))
+    assert trade["outcome"] == backtest.OUTCOME_OPEN
+    assert trade["r"] is None
+    assert backtest.open_count([trade]) == 1
+
+
+def test_missing_signal_candle_counts_as_open_and_is_excluded_from_stats():
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1045, 1.1000)])
+    trade = evaluate_one(df, make_config(), time="2026-01-06T10:15:00+00:00")
+    assert trade["outcome"] == backtest.OUTCOME_OPEN
+    rows, total = backtest.summarize([trade], [trade["pattern"]])
+    assert total["n"] == 0
+
+
+def test_neutral_signal_is_counted_but_not_evaluated():
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1045, 1.1000)])
+    trade = evaluate_one(df, make_config(), direction="NEUTRAL", sl="", tp="", risk_pips="",
+                         pattern="Doji", source="candles_single")
+    assert trade["outcome"] == backtest.OUTCOME_NOT_EVALUATED
+    assert trade["r"] is None
+
+
+def test_empty_csv_yields_no_rows(tmp_path):
+    path = tmp_path / "signals_log.csv"
+    path.write_bytes(b"")
+    assert evaluate.read_signal_rows(path) == []
+
+
+def test_empty_csv_main_returns_zero_without_fetching(tmp_path, capsys):
+    path = tmp_path / "signals_log.csv"
+    path.write_bytes(b"")
+
+    def fetch(*args, **kwargs):
+        pytest.fail("Kerzen dürfen bei leerer CSV nicht geladen werden")
+
+    assert evaluate.main(config=make_config(), fetch=fetch, csv_path=path) == 0
+    assert "Keine Signale" in capsys.readouterr().out
+
+
+def test_missing_columns_give_clear_error(tmp_path, capsys):
+    path = tmp_path / "signals_log.csv"
+    write_csv(path, [{"time": "2026-01-05T10:15:00+00:00", "direction": "BUY"}],
+              fields=["time", "direction"])
+
+    with pytest.raises(ValueError, match="Pflichtspalten fehlen: source, pattern, entry, sl, tp"):
+        evaluate.read_signal_rows(path)
+
+    def fetch(*args, **kwargs):
+        pytest.fail("Kerzen dürfen bei fehlenden Spalten nicht geladen werden")
+
+    assert evaluate.main(config=make_config(), fetch=fetch, csv_path=path) == 1
+    assert "Pflichtspalten fehlen" in capsys.readouterr().out
+
+
+def test_evaluate_matches_backtest_r_for_same_signal(tmp_path):
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1045, 1.1000)])
+    config = make_config()
+    signal = Signal(
+        time=pd.Timestamp("2026-01-05 10:15", tz="UTC"), symbol="EURUSD=X", interval="15m",
+        source="candles_main", pattern="Bullish Engulfing", direction="BUY",
+        entry=1.1000, atr=0.0010, sl=1.0980, tp=1.1040, risk_pips=20.0, rr=2.0,
+    )
+    backtest_trade = backtest.simulate(signal, df, 0, config)
+
+    path = tmp_path / "signals_log.csv"
+    write_csv(path, [signal_row()])
+    evaluate_trade = evaluate.evaluate_rows(evaluate.read_signal_rows(path), df, config)[0]
+
+    assert evaluate_trade["outcome"] == backtest_trade["outcome"]
+    assert evaluate_trade["r"] == pytest.approx(backtest_trade["r"])
