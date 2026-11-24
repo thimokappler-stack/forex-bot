@@ -209,12 +209,20 @@ def test_zone_groups_assign_each_group_with_fixed_examples():
 
 
 def test_trend_groups_depend_on_direction_and_swing_trend():
-    mit, gegen, range_ = (predicate for _, predicate in backtest.TREND_GROUPS)
+    mit, gegen, range_, ohne = (predicate for _, predicate in backtest.TREND_GROUPS)
     assert mit(make_trade("BUY", trend="up")) and mit(make_trade("SELL", trend="down"))
     assert gegen(make_trade("BUY", trend="down")) and gegen(make_trade("SELL", trend="up"))
     assert range_(make_trade("BUY", trend="range"))
     no_pivots = make_trade("BUY", trend=None)
+    assert ohne(no_pivots) and ohne(make_trade("SELL", trend=""))
     assert not (mit(no_pivots) or gegen(no_pivots) or range_(no_pivots))
+
+
+def test_trend_groups_add_up_to_population_with_ohne_swing_trend():
+    population = [make_trade(trend=t) for t in ("up", "down", "range", None, "", "up")]
+    counts = [sum(1 for t in population if predicate(t)) for _, predicate in backtest.TREND_GROUPS]
+    assert counts == [2, 1, 1, 2]
+    assert sum(counts) == len(population)
 
 
 def test_standard_error_is_sample_std_over_root_n():
@@ -256,6 +264,14 @@ def test_warning_when_group_is_below_5_percent():
     out = backtest.render_zone_compare(population, default_config, "Test")
     warnings = [line for line in out.splitlines() if "Warnung" in line]
     assert any("c) gegen starke Zone" in line for line in warnings)
+
+
+def test_leere_restgruppe_ohne_swing_trend_loest_keine_warnung_aus():
+    population = [make_trade("BUY", aligned=True, relation="at_support", trend="up") for _ in range(10)]
+    population += [make_trade("BUY", aligned=None, relation="none", trend="down") for _ in range(10)]
+    out = backtest.render_zone_compare(population, default_config, "Test")
+    assert "ohne Swing-Trend" in out
+    assert not [line for line in out.splitlines() if "Warnung" in line and "ohne Swing-Trend" in line]
 
 
 def test_pooling_adds_trades_of_two_markets():

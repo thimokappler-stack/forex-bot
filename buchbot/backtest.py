@@ -11,9 +11,12 @@ import argparse
 import csv
 import logging
 import math
+import os
 import sys
 import time
 from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
 from statistics import stdev
 
 import pandas as pd
@@ -263,10 +266,12 @@ ZONE_GROUPS = (
     ("c) gegen starke Zone", _is_against),
     ("d) a) und nicht c)", lambda t: _is_aligned(t) and not _is_against(t)),
 )
+NO_TREND_GROUP = "ohne Swing-Trend"
 TREND_GROUPS = (
     ("in Trendrichtung", lambda t: _trend_relation(t) == "mit"),
     ("gegen den Trend", lambda t: _trend_relation(t) == "gegen"),
     ("range", lambda t: _trend_relation(t) == "range"),
+    (NO_TREND_GROUP, lambda t: _trend_relation(t) in (None, "")),
 )
 
 
@@ -312,7 +317,7 @@ def _distribution_lines(population, groups, config, scope_title):
         zones = [t["tags"]["sr_strong_zones"] for t in members if "sr_strong_zones" in t["tags"]]
         mean_zones = sum(zones) / len(zones) if zones else None
         lines.append(f"{name:<38}{_pct(len(members), total):>8}{_fmt_mean(mean_zones):>16}")
-        if total:
+        if total and name != NO_TREND_GROUP:
             share = len(members) / total
             if share > config.ZONE_WARN_SHARE_HIGH or share < config.ZONE_WARN_SHARE_LOW:
                 warnings.append(f"  Warnung: Zonenparameter möglicherweise unpassend "
@@ -468,6 +473,37 @@ def _print_report(df, cfg, trades, funnel):
     print()
 
 
+SNAPSHOT_COLUMNS = ["market", "interval", "fetched_at", "time_utc", "open", "high", "low", "close"]
+
+
+def load_snapshot(path):
+    """Liest den Datenstand als {Markt: (DataFrame, Intervall, Abrufzeit)}, Zeiten in UTC, Reihenfolge der Datei."""
+    raw = pd.read_csv(path, sep=";",
+                      dtype={"market": str, "interval": str, "fetched_at": str, "time_utc": str})
+    entries = {}
+    for market, part in raw.groupby("market", sort=False):
+        df = part[["open", "high", "low", "close"]].astype(float).reset_index(drop=True)
+        df.index = pd.to_datetime(part["time_utc"].to_numpy(), utc=True)
+        entries[market] = (df, part["interval"].iloc[0], part["fetched_at"].iloc[0])
+    return entries
+
+
+def save_snapshot(path, entries):
+    """Schreibt alle Märkte in eine Datei; zuerst temporäre Datei, dann ersetzen."""
+    frames = []
+    for market, (df, interval, fetched_at) in entries.items():
+        part = df[["open", "high", "low", "close"]].reset_index(drop=True)
+        part.insert(0, "time_utc", [ts.isoformat() for ts in df.index])
+        part.insert(0, "fetched_at", fetched_at)
+        part.insert(0, "interval", interval)
+        part.insert(0, "market", market)
+        frames.append(part)
+    combined = pd.concat(frames, ignore_index=True)[SNAPSHOT_COLUMNS]
+    tmp = path.with_name(path.name + ".tmp")
+    combined.to_csv(tmp, sep=";", index=False)
+    os.replace(tmp, path)
+
+
 def default_csv_path(markets=None):
     """Einzelmarkt-Lauf: backtest_results_<MARKT>.csv, sonst backtest_results.csv (überschreibt sich nicht gegenseitig)."""
     if markets and len(markets) == 1:
@@ -475,13 +511,17 @@ def default_csv_path(markets=None):
     return BASE_DIR / default_config.BACKTEST_CSV_FILE
 
 
-def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None):
+def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snapshot=None):
     """Backtest je Markt, bei mehreren Märkten zusätzlich gepoolter Zonen-Vergleich mit Zeithälften. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte.
 
     sr_max_zones überschreibt SR_MAX_ZONES_PER_SIDE aus config.py (None = Standardwert aus config.py).
+    snapshot: CSV-Datei mit eingefrorenen Kerzen. Fehlt sie, wird abgerufen und gespeichert; vorhandene Märkte werden daraus gelesen.
     """
     names = list(markets) if markets else list(default_config.MARKETS)
     max_zones = default_config.SR_MAX_ZONES_PER_SIDE if sr_max_zones is None else sr_max_zones
+    snapshot = Path(snapshot) if snapshot else None
+    snapshot_entries = load_snapshot(snapshot) if snapshot and snapshot.exists() else {}
+    fetched_any = False
     print(f"Starke Zonen je Seite: {'alle' if max_zones is None else max_zones}\n")
     status = 0
     all_trades = []
@@ -490,12 +530,24 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None):
         market_start = time.perf_counter()
         cfg = default_config.for_market(name)
         cfg.SR_MAX_ZONES_PER_SIDE = max_zones
-        df = fetch(cfg.SYMBOL, cfg.INTERVAL, lookback=None, period=cfg.BACKTEST_PERIOD)
-        if df is None or len(df) == 0:
-            print(f"[{cfg.MARKET}] Keine Kerzen erhalten, Backtest für diesen Markt übersprungen.\n")
-            status = 1
-            continue
-        df = remove_incomplete_candle(df, cfg.INTERVAL)
+        cached = snapshot_entries.get(name)
+        if cached is not None and cached[1] == cfg.INTERVAL:
+            raw, _, fetched_at = cached
+            origin = "aus Snapshot"
+        else:
+            raw = fetch(cfg.SYMBOL, cfg.INTERVAL, lookback=None, period=cfg.BACKTEST_PERIOD)
+            if raw is None or len(raw) == 0:
+                print(f"[{cfg.MARKET}] Keine Kerzen erhalten, Backtest für diesen Markt übersprungen.\n")
+                status = 1
+                continue
+            fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            origin = "neu abgerufen"
+            snapshot_entries[name] = (raw, cfg.INTERVAL, fetched_at)
+            fetched_any = True
+        if snapshot:
+            print(f"Datenstand {cfg.MARKET}: {origin}, abgerufen {fetched_at} UTC, Kerzen "
+                  f"{raw.index[0]:%Y-%m-%d %H:%M} bis {raw.index[-1]:%Y-%m-%d %H:%M} UTC ({len(raw)})")
+        df = remove_incomplete_candle(raw, cfg.INTERVAL, now=pd.Timestamp(fetched_at))
         trades, funnel = run_backtest(df, cfg)
         for trade in trades:
             trade["market"] = cfg.MARKET
@@ -504,6 +556,9 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None):
         _print_report(df, cfg, trades, funnel)
         print(f"Laufzeit {cfg.MARKET}: {time.perf_counter() - market_start:.1f} s\n")
 
+    if snapshot and fetched_any:
+        save_snapshot(snapshot, snapshot_entries)
+        print(f"Snapshot gespeichert: {snapshot}\n")
     if len(names) > 1:
         print(render_zone_compare(all_trades, default_config,
                                   "Zonen-Vergleich GESAMT (alle Märkte gepoolt)",
@@ -537,6 +592,14 @@ def _parse_max_zones(value):
     return number
 
 
+def _parse_snapshot(value):
+    """Snapshot nur als .csv (durch .gitignore vor dem Committen geschützt); relative Pfade gelten ab Projektordner."""
+    path = Path(value)
+    if path.suffix.lower() != ".csv":
+        raise argparse.ArgumentTypeError(f"Snapshot muss eine .csv-Datei sein: {value}")
+    return path if path.is_absolute() else BASE_DIR / path
+
+
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Backtest der Muster je Markt")
     group = parser.add_mutually_exclusive_group()
@@ -546,10 +609,12 @@ def cli(argv=None):
                        help="ALL oder Liste, z. B. EURUSD,GBPUSD (gepoolter Zonen-Vergleich)")
     parser.add_argument("--sr-max-zones", type=_parse_max_zones, default=None,
                         help="Je Seite nur die N starken Zonen mit den meisten Berührungen (überschreibt SR_MAX_ZONES_PER_SIDE)")
+    parser.add_argument("--snapshot", type=_parse_snapshot, default=None,
+                        help="CSV mit eingefrorenen Kerzen: fehlt sie, wird abgerufen und gespeichert, sonst daraus gelesen")
     args = parser.parse_args(argv)
     if args.market:
-        return main(markets=[args.market], sr_max_zones=args.sr_max_zones)
-    return main(markets=args.markets, sr_max_zones=args.sr_max_zones)
+        return main(markets=[args.market], sr_max_zones=args.sr_max_zones, snapshot=args.snapshot)
+    return main(markets=args.markets, sr_max_zones=args.sr_max_zones, snapshot=args.snapshot)
 
 
 if __name__ == "__main__":

@@ -69,6 +69,7 @@ Lädt maximal verfügbare 15m-Historie (etwa 60 Tage) und simuliert alle Trades:
 python -m buchbot.backtest                      # alle Märkte, je Markt eine Auswertung
 python -m buchbot.backtest --market EURUSD      # nur ein Markt
 python -m buchbot.backtest --markets ALL        # alle zwölf Märkte, zusätzlich gepoolter Zonen-Vergleich
+python -m buchbot.backtest --markets ALL --snapshot backtest_snapshot.csv   # eingefrorener Datenstand
 python -m buchbot.backtest --markets EURUSD,GBPUSD
 python -m buchbot.backtest --markets ALL --sr-max-zones 3   # nur für den Vergleich: je Seite die 3 stärksten Zonen
 ```
@@ -87,6 +88,8 @@ Zusätzlich je Markt (und bei mehreren Märkten gepoolt) ein **Zonen-Vergleich**
 - Bei `--markets ALL` zusätzlich getrennt für die erste und zweite Hälfte des Zeitraums (Trennung am Median der Signalzeiten, gepoolt über alle Märkte), jeweils mit Anzahl, Ø R und Standardfehler
 
 `--sr-max-zones N` überschreibt `SR_MAX_ZONES_PER_SIDE` nur für den Backtest. Standard ist `None` (alle starken Zonen). Der Live-Bot ist davon nicht betroffen.
+
+`--snapshot DATEI.csv` friert den Datenstand ein: Beim ersten Lauf werden alle abgerufenen Kerzen in der Datei gespeichert (Dateien `*.csv` sind in `.gitignore`). Spätere Läufe mit derselben Option lesen daraus, ohne Abruf. Die Ausgabe nennt Abrufzeitpunkt und Zeitraum je Markt. Fehlt ein Markt in der Datei, wird er nachgeladen und ergänzt. Beispiel: `python -m buchbot.backtest --markets ALL --snapshot backtest_snapshot.csv`. Zwei Läufe mit demselben Snapshot liefern identische Ergebnisse, auch für `--sr-max-zones`.
 
 Der Backtest verändert keine Signale. Die Zonen-Auswertung dient nur der Einschätzung.
 

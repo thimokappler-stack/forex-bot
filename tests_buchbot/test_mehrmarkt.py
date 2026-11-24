@@ -1,3 +1,4 @@
+import argparse
 import io
 from contextlib import redirect_stdout
 import pandas as pd
@@ -255,6 +256,73 @@ def test_backtest_gibt_tabelle_je_markt_und_uebergibt_period(tmp_path):
     assert "=== Bitcoin (BTC) ===" in out.getvalue()
     assert calls == [("BTC-USD", real_config.BACKTEST_PERIOD)]
     assert real_config.BACKTEST_PERIOD == "60d"
+
+
+def _no_fetch(*args, **kwargs):
+    raise AssertionError("Snapshot vorhanden, es darf nicht abgerufen werden")
+
+
+def test_snapshot_zweiter_lauf_liest_datei_und_liefert_identische_csv(tmp_path):
+    snap = tmp_path / "snap.csv"
+
+    def fetch(symbol, interval, lookback=None, period=None):
+        return make_candles(periods=300, start="2026-04-01 00:00")
+
+    first, second = io.StringIO(), io.StringIO()
+    with redirect_stdout(first):
+        backtest.main(markets=["BTC", "EURUSD"], fetch=fetch, csv_path=str(tmp_path / "a.csv"), snapshot=snap)
+    with redirect_stdout(second):
+        backtest.main(markets=["BTC", "EURUSD"], fetch=_no_fetch, csv_path=str(tmp_path / "b.csv"), snapshot=snap)
+    assert (tmp_path / "a.csv").read_bytes() == (tmp_path / "b.csv").read_bytes()
+    assert "neu abgerufen" in first.getvalue()
+    assert second.getvalue().count("Datenstand") == 2
+    assert "aus Snapshot" in second.getvalue()
+
+
+def test_snapshot_signalzahl_bleibt_mit_und_ohne_sr_max_zones_gleich(tmp_path):
+    snap = tmp_path / "snap.csv"
+
+    def fetch(symbol, interval, lookback=None, period=None):
+        return make_candles(periods=300, start="2026-04-01 00:00")
+
+    with redirect_stdout(io.StringIO()):
+        backtest.main(markets=["BTC", "EURUSD"], fetch=fetch, csv_path=str(tmp_path / "a.csv"), snapshot=snap)
+        backtest.main(markets=["BTC", "EURUSD"], fetch=_no_fetch, csv_path=str(tmp_path / "b.csv"),
+                      sr_max_zones=3, snapshot=snap)
+    assert len((tmp_path / "a.csv").read_text(encoding="utf-8-sig").splitlines()) == \
+        len((tmp_path / "b.csv").read_text(encoding="utf-8-sig").splitlines())
+
+
+def test_snapshot_roundtrip_behaelt_preise_und_utc_zeiten(tmp_path):
+    snap = tmp_path / "snap.csv"
+    df = make_candles(periods=5)
+    df["close"] = [1.0987654321 + i * 1e-7 for i in range(5)]
+    backtest.save_snapshot(snap, {"EURUSD": (df, "15m", "2026-05-06T10:00:00+00:00")})
+    loaded, interval, fetched_at = backtest.load_snapshot(snap)["EURUSD"]
+    pd.testing.assert_frame_equal(loaded, df, check_freq=False, check_exact=True)
+    assert (interval, fetched_at) == ("15m", "2026-05-06T10:00:00+00:00")
+
+
+def test_snapshot_fehlender_markt_wird_nachgeladen(tmp_path):
+    snap = tmp_path / "snap.csv"
+    interval = for_market("EURUSD").INTERVAL
+    backtest.save_snapshot(snap, {"EURUSD": (make_candles(periods=300, start="2026-04-01 00:00"), interval,
+                                             "2026-05-06T10:00:00+00:00")})
+    calls = []
+
+    def fetch(symbol, interval, lookback=None, period=None):
+        calls.append(symbol)
+        return make_candles(periods=300, start="2026-04-01 00:00")
+
+    with redirect_stdout(io.StringIO()):
+        backtest.main(markets=["EURUSD", "BTC"], fetch=fetch, csv_path=str(tmp_path / "bt.csv"), snapshot=snap)
+    assert calls == ["BTC-USD"]
+    assert set(backtest.load_snapshot(snap)) == {"EURUSD", "BTC"}
+
+
+def test_snapshot_muss_csv_sein():
+    with pytest.raises(argparse.ArgumentTypeError):
+        backtest._parse_snapshot("daten.parquet")
 
 
 def test_backtest_csv_pfad_ist_je_einzelmarkt_getrennt():
