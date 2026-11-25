@@ -198,6 +198,18 @@ MIN_CANDLES_FOR_BACKTEST = 500  # Märkte mit weniger brauchbaren Kerzen werden 
 DECADE_BOUNDARIES = (2010, 2020)  # Jahrzehnt-Aufteilung: bis 2009, 2010 bis 2019, ab 2020
 BACKTEST_CSV_FILE = "backtest_results.csv"  # Einzelsignale, relativ zum Projektordner
 
+# Nullvergleich (--null-test) und vorab festgelegte Kriterien K1 bis K5
+NULL_TEST_SEED = 12345        # Zufallsstartwert der Permutation
+NULL_TEST_DRAWS = 2000        # Anzahl Ziehungen
+NULL_PATTERN_CANDLES = 2      # Pseudo-Muster aus den letzten N Kerzen
+NULL_QUANTILES = (0.05, 0.95, 0.99)  # Quantile der Nullverteilung (K1_QUANTILE muss enthalten sein)
+K1_QUANTILE = 0.99            # K1: Ø R vor Kosten über diesem Quantil der Nullverteilung (p < 0.01)
+K2_MIN_DECADES = 2            # K2: Ø R vor Kosten > 0 in mindestens so vielen Jahrzehnten
+K3_MIN_TRADES = 30            # K3: nur Märkte mit mindestens so vielen Trades zählen
+K3_MIN_SHARE = 0.6            # K3: Anteil dieser Märkte mit Ø R vor Kosten > 0
+K4_MIN_RATIO = 3              # K4: Ø R vor Kosten geteilt durch Cluster-SE über diesem Wert
+NULL_EXCLUDED_MARKETS = ("BTC", "ETH", "GOLD")  # Zusatzzahl: gepoolt ohne diese Märkte
+
 # Detektoren, die nie per Mail laufen dürfen (Hintergrund-Analyse)
 LOG_ONLY_DETECTORS = ("candles_single",)
 DETECTOR_MODES = ("off", "log_only", "notify")

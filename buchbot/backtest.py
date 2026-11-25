@@ -45,6 +45,7 @@ SINGLE_PATTERN_NAMES = [p.name for p in SINGLE_PATTERNS]
 TRADED_DIRECTIONS = ("BUY", "SELL")
 FUNNEL_STAGES = ("raw", "trend", "sltp")
 TRADE_STAGES = ("simuliert", "offen", "uebersprungen")
+SE_KEYS = ("se", "se_gross", "cse", "cse_gross")
 
 CSV_FIELDS = [
     "market", "pattern", "direction", "signal_time_utc", "entry", "sl", "tp", "risk_pips", "rr",
@@ -183,16 +184,38 @@ def _std_error(values):
     return stdev(values) / math.sqrt(len(values))
 
 
+def cluster_std_error(values, clusters):
+    """Cluster-Standardfehler des Mittelwerts: Wurzel aus der Summe über Cluster von (Summe der Abweichungen
+    vom Mittelwert im Cluster)^2, geteilt durch n. clusters: je Wert ein Cluster-Schlüssel. None bei weniger als 2 Werten.
+    """
+    n = len(values)
+    if n < 2:
+        return None
+    mean = sum(values) / n
+    deviation_sums = {}
+    for value, cluster in zip(values, clusters):
+        deviation_sums[cluster] = deviation_sums.get(cluster, 0.0) + (value - mean)
+    return math.sqrt(sum(s * s for s in deviation_sums.values())) / n
+
+
+def month_cluster(time):
+    """Cluster für den Cluster-Standardfehler: Kalendermonat der Signalzeit (alle Märkte zusammen)."""
+    return (time.year, time.month)
+
+
 def _stats(items):
     """Zählt Trades ohne offene; Anteile und R nur aus bewerteten Trades.
 
-    R nach Kosten (r) und vor Kosten (r_gross); der Standardfehler gilt für R nach Kosten (vor Kosten identisch,
-    da nur um eine Konstante verschoben).
+    R nach Kosten (r) und vor Kosten (r_gross). Der Standardfehler (se, se_gross) und der Cluster-Standardfehler
+    (cse, cse_gross) werden je für R nach und vor Kosten berechnet, weil Spread/Risiko je Trade verschieden ist.
+    Der Cluster-Standardfehler braucht die Signalzeit aller Trades (sonst None).
     """
     items = [t for t in items if t["outcome"] != OUTCOME_OPEN]
     scored = [t for t in items if t["r"] is not None]
     rs = [t["r"] for t in scored]
     gross = [t["r_gross"] for t in scored]
+    times = [t.get("signal_time") for t in scored]
+    clusters = [month_cluster(x) for x in times] if all(x is not None for x in times) else None
     return {
         "n": len(items),
         "tp": sum(1 for t in items if t["outcome"] == OUTCOME_TP),
@@ -203,6 +226,9 @@ def _stats(items):
         "avg_r_gross": sum(gross) / len(gross) if gross else None,
         "sum_r_gross": sum(gross) if gross else None,
         "se": _std_error(rs),
+        "se_gross": _std_error(gross),
+        "cse": cluster_std_error(rs, clusters) if clusters is not None else None,
+        "cse_gross": cluster_std_error(gross, clusters) if clusters is not None else None,
     }
 
 
@@ -227,19 +253,26 @@ def _fmt_r(value):
     return "-" if value is None else f"{value:+.2f}"
 
 
-def _r_columns(spread, with_se):
-    """R-Spalten als (Titel, Mindestbreite, Schlüssel): vor Kosten (Brutto), nach Kosten (Netto) oder beides."""
+def _r_columns(spread, with_se, cluster_se=False):
+    """R-Spalten als (Titel, Mindestbreite, Schlüssel): vor Kosten (Brutto), nach Kosten (Netto) oder beides.
+
+    Der Standardfehler gehört zu R nach Kosten, im Modus "without" zu R vor Kosten. Der Cluster-Standardfehler
+    (Kalendermonat) steht für jede gezeigte Kostenart.
+    """
     if spread not in default_config.BACKTEST_SPREAD_MODES:
         raise ValueError(f"unbekannter Spread-Modus: {spread}")
     if spread == "with":
         avg, total = [("Ø R", 8, "avg_r")], [("Summe R", 10, "sum_r")]
+        se, cluster = [("SE Ø R", 8, "se")], [("SE Cl.", 9, "cse")]
     elif spread == "without":
         avg, total = [("Ø R vor K.", 11, "avg_r_gross")], [("Summe R vor K.", 15, "sum_r_gross")]
+        se, cluster = [("SE Ø R", 8, "se_gross")], [("SE Cl.", 9, "cse_gross")]
     else:
         avg = [("Ø R vor K.", 11, "avg_r_gross"), ("Ø R nach K.", 13, "avg_r")]
         total = [("Summe R vor K.", 15, "sum_r_gross"), ("Summe R nach K.", 17, "sum_r")]
-    se = [("SE Ø R", 8, "se")] if with_se else []
-    return avg + se + total
+        se = [("SE Ø R", 8, "se")]
+        cluster = [("SE Cl. vor K.", 15, "cse_gross"), ("SE Cl. nach K.", 16, "cse")]
+    return avg + (se if with_se else []) + (cluster if cluster_se else []) + total
 
 
 def _column_width(title, width):
@@ -253,13 +286,13 @@ def _r_header(columns):
 def _r_values(stats, columns):
     cells = []
     for title, width, key in columns:
-        text = _fmt_se(stats[key]) if key == "se" else _fmt_r(stats[key])
+        text = _fmt_se(stats[key]) if key in SE_KEYS else _fmt_r(stats[key])
         cells.append(f"{text:>{_column_width(title, width)}}")
     return "".join(cells)
 
 
-def render_table(rows, total, config, title, spread="with", with_se=False):
-    columns = _r_columns(spread, with_se)
+def render_table(rows, total, config, title, spread="with", with_se=False, cluster_se=False):
+    columns = _r_columns(spread, with_se, cluster_se)
     header = f"{'Muster':<26}{'Anzahl':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}" + _r_header(columns)
     lines = [title, "", header, "-" * len(header)]
     notes = []
@@ -331,8 +364,8 @@ def _fmt_mean(value):
     return "-" if value is None else f"{value:.1f}"
 
 
-def _zone_group_lines(population, groups, config, spread):
-    columns = _r_columns(spread, with_se=True)
+def _zone_group_lines(population, groups, config, spread, cluster_se=False):
+    columns = _r_columns(spread, with_se=True, cluster_se=cluster_se)
     header = f"{'Gruppe':<38}{'Anzahl':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}" + _r_header(columns)
     lines = [header, "-" * len(header)]
     notes = []
@@ -394,9 +427,9 @@ def _header_lines(population, config, scope_title):
     return lines, warnings
 
 
-def _zone_tables(population, config, spread="with"):
-    zone_lines, zone_notes = _zone_group_lines(population, ZONE_GROUPS, config, spread)
-    trend_lines, trend_notes = _zone_group_lines(population, TREND_GROUPS, config, spread)
+def _zone_tables(population, config, spread="with", cluster_se=False):
+    zone_lines, zone_notes = _zone_group_lines(population, ZONE_GROUPS, config, spread, cluster_se)
+    trend_lines, trend_notes = _zone_group_lines(population, TREND_GROUPS, config, spread, cluster_se)
     return ["Zonen-Gruppen:"] + zone_lines + ["Trend-Gruppen:"] + trend_lines + zone_notes + trend_notes
 
 
@@ -406,7 +439,7 @@ def signal_time_median(trades):
     return times[len(times) // 2] if times else None
 
 
-def render_zone_compare(trades, config, title, split_at=None, spread="with"):
+def render_zone_compare(trades, config, title, split_at=None, spread="with", cluster_se=False):
     """Zonen-Vergleich je Musterbereich: Gruppen (Zonen und Trend) mit Statistik und Verteilung.
 
     split_at: optionaler Zeitpunkt; dann zusätzlich Tabellen für Signale davor und danach.
@@ -422,7 +455,7 @@ def render_zone_compare(trades, config, title, split_at=None, spread="with"):
             continue
         header, header_warnings = _header_lines(population, config, scope_title)
         out += header
-        out += _zone_tables(population, config, spread)
+        out += _zone_tables(population, config, spread, cluster_se)
         dist_lines, warnings = _distribution_lines(
             population, ZONE_GROUPS + TREND_GROUPS, config, scope_title)
         out += ["Verteilung:"] + dist_lines + header_warnings + warnings
@@ -431,9 +464,9 @@ def render_zone_compare(trades, config, title, split_at=None, spread="with"):
             late = [t for t in population if t["signal_time"] >= split_at]
             cut = f"{split_at:%Y-%m-%d %H:%M} UTC"
             out += [f"Zeithälfte 1 (Signale vor {cut}): {len(early)} BUY/SELL-Signale"]
-            out += _zone_tables(early, config, spread)
+            out += _zone_tables(early, config, spread, cluster_se)
             out += [f"Zeithälfte 2 (Signale ab {cut}): {len(late)} BUY/SELL-Signale"]
-            out += _zone_tables(late, config, spread)
+            out += _zone_tables(late, config, spread, cluster_se)
     return "\n".join(out)
 
 
@@ -453,7 +486,7 @@ def decade_label(time):
     return labels[2]
 
 
-def render_decade_tables(trades, names, config, title, spread):
+def render_decade_tables(trades, names, config, title, spread, cluster_se=False):
     """Tabellen je Jahrzehnt der Signalzeit für die Muster in names."""
     out = []
     for label in decade_labels():
@@ -461,7 +494,7 @@ def render_decade_tables(trades, names, config, title, spread):
         count = sum(1 for t in part if t["pattern"] in names)
         rows, total = summarize(part, names)
         out.append(render_table(rows, total, config, f"{title}, Zeit {label} ({count} Trades)",
-                                spread, with_se=True))
+                                spread, with_se=True, cluster_se=cluster_se))
     return "\n\n".join(out)
 
 
@@ -587,7 +620,7 @@ def default_csv_path(markets=None, interval=None):
 
 
 def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snapshot=None,
-         interval=None, no_sr=False, spread="both"):
+         interval=None, no_sr=False, spread="both", null_test=False):
     """Backtest je Markt, bei mehreren Märkten zusätzlich gepoolte Tabellen. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte.
 
     sr_max_zones überschreibt SR_MAX_ZONES_PER_SIDE aus config.py (None = Standardwert aus config.py).
@@ -595,6 +628,8 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snap
     interval: überschreibt das Intervall aller Märkte nur für diesen Lauf (Zeitraum aus BACKTEST_PERIOD_BY_INTERVAL).
     no_sr: annotate nicht aufrufen, keine Zonen-Tabellen.
     spread: "both", "with" (nach Kosten) oder "without" (vor Kosten).
+    null_test: zusätzlich Nullvergleich per Permutation mit den Kriterien K1 bis K5 (buchbot.nulltest).
+    Märkte, die denselben Datensatz (Symbol und Intervall) wie ein früherer Markt nutzen, werden übersprungen.
     """
     names = list(markets) if markets else list(default_config.MARKETS)
     max_zones = default_config.SR_MAX_ZONES_PER_SIDE if sr_max_zones is None else sr_max_zones
@@ -605,6 +640,8 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snap
           f"{' (Zonen aus, --no-sr)' if no_sr else ''}\n")
     status = 0
     all_trades = []
+    candidates = {}
+    used_datasets = {}
     run_start = time.perf_counter()
     for name in names:
         market_start = time.perf_counter()
@@ -614,6 +651,12 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snap
         if interval:
             cfg.INTERVAL = interval
             cfg.BACKTEST_PERIOD = default_config.BACKTEST_PERIOD_BY_INTERVAL[interval]
+        dataset = (cfg.SYMBOL, cfg.INTERVAL)
+        if dataset in used_datasets:
+            print(f"[{cfg.MARKET}] übersprungen: nutzt denselben Datensatz ({cfg.SYMBOL}, {cfg.INTERVAL}) wie "
+                  f"{used_datasets[dataset]}, sonst würden dieselben Trades doppelt gezählt.\n")
+            continue
+        used_datasets[dataset] = cfg.MARKET
         cached = snapshot_entries.get((name, cfg.INTERVAL))
         if cached is not None:
             raw, fetched_at = cached
@@ -640,6 +683,9 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snap
               f"SL_BUFFER_ATR {cfg.SL_BUFFER_ATR}, RISK_REWARD {cfg.RISK_REWARD}, "
               f"TREND_EMA_PERIOD {cfg.TREND_EMA_PERIOD}, ATR_PERIOD {cfg.ATR_PERIOD}")
         trades, funnel = run_backtest(df, cfg)
+        if null_test:
+            from buchbot import nulltest
+            candidates[cfg.MARKET] = nulltest.candidate_trades(df, cfg)
         for trade in trades:
             trade["market"] = cfg.MARKET
             trade["decimals"] = cfg.PRICE_DECIMALS
@@ -654,16 +700,21 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snap
         split_at = signal_time_median(all_trades)
         pooled_rows, pooled_total = summarize(all_trades, MAIN_PATTERN_NAMES)
         print(render_table(pooled_rows, pooled_total, default_config,
-                           "Haupt-Muster GESAMT (alle Märkte gepoolt)", spread, with_se=True))
+                           "Haupt-Muster GESAMT (alle Märkte gepoolt)", spread, with_se=True, cluster_se=True))
         print()
         print(render_decade_tables(all_trades, MAIN_PATTERN_NAMES, default_config,
-                                   "Haupt-Muster GESAMT", spread))
+                                   "Haupt-Muster GESAMT", spread, cluster_se=True))
         print()
         if not no_sr:
             print(render_zone_compare(all_trades, default_config,
                                       "Zonen-Vergleich GESAMT (alle Märkte gepoolt)",
-                                      split_at=split_at, spread=spread))
+                                      split_at=split_at, spread=spread, cluster_se=True))
             print()
+    if null_test:
+        from buchbot import nulltest
+        null_start = time.perf_counter()
+        print(nulltest.render_report(all_trades, candidates))
+        print(f"Laufzeit Nullvergleich: {time.perf_counter() - null_start:.1f} s\n")
     path = csv_path or default_csv_path(markets, interval)
     write_csv(all_trades, path)
     print(f"Einzelsignale: {path}")
@@ -715,11 +766,13 @@ def cli(argv=None):
                         help="Intervall nur für den Backtest (Zeitraum aus BACKTEST_PERIOD_BY_INTERVAL); Standard: Intervall des Markts")
     parser.add_argument("--no-sr", action="store_true",
                         help="Zonen nicht berechnen (sr-Spalten bleiben leer, keine Zonen-Tabellen)")
+    parser.add_argument("--null-test", action="store_true",
+                        help="Nullvergleich per Permutation (Pseudo-Muster, Seed und Ziehungen aus config.py) und Kriterien K1 bis K5")
     parser.add_argument("--spread", choices=list(default_config.BACKTEST_SPREAD_MODES), default="both",
                         help="R nach Kosten (with), vor Kosten (without) oder beides (both, Standard)")
     args = parser.parse_args(argv)
     options = dict(sr_max_zones=args.sr_max_zones, snapshot=args.snapshot, interval=args.interval,
-                   no_sr=args.no_sr, spread=args.spread)
+                   no_sr=args.no_sr, spread=args.spread, null_test=args.null_test)
     if args.market:
         return main(markets=[args.market], **options)
     return main(markets=args.markets, **options)

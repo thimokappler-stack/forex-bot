@@ -103,6 +103,21 @@ Zweck: Prüfen, ob die bestehenden Regeln (Muster, EMA-50-Trendfilter, ATR, SL/T
 - Zusätzlich zu den Zeithälften werden die Haupt-Muster-Tabellen nach Jahrzehnt der Signalzeit ausgegeben (bis 2009, 2010 bis 2019, ab 2020). Unter 30 Trades erscheint der Hinweis "zu wenige Fälle".
 - Die Ausgabe beginnt mit Datenstand (Abrufdatum und Zeitraum) und den verwendeten Parametern.
 - Beispiele: `python -m buchbot.backtest --markets ALL --interval 1d --no-sr --snapshot backtest_snapshot_1d.csv` und `--interval 1h --no-sr --snapshot backtest_snapshot_1h.csv`. Die Läufe je Intervall werden nacheinander gestartet.
+- Märkte, die bei `--interval` denselben Datensatz (Symbol und Intervall) wie ein früherer Markt nutzen (EURUSD_30M bei 1d), werden mit Hinweis übersprungen, damit nichts doppelt gezählt wird.
+
+#### Nullvergleich und Cluster-Standardfehler (Forschung, Schritt 13b)
+
+Zweck: Prüfen, ob die Haupt-Muster besser sind als zufällig gewählte Kerzen mit derselben Trendbedingung. Der Live-Betrieb ist nicht betroffen, es werden keine Parameter variiert.
+
+- **Cluster-SE** (Spalten "SE Cl." in den gepoolten Tabellen, zusätzlich zum SE): Cluster ist der Kalendermonat der Signalzeit (alle Märkte zusammen). SE = Wurzel aus der Summe über Cluster von (Summe der (R − Mittelwert) im Cluster)² geteilt durch n.
+- `--null-test`: Pseudo-Muster aus den letzten `NULL_PATTERN_CANDLES` (2) Kerzen. Kandidaten sind alle Kerzen, die die Trendbedingung des Live-Filters erfüllen (BUY nur bei Schluss unter, SELL nur bei Schluss über der EMA, Trend auf der Kerze vor dem Pseudo-Muster). Einstieg, SL/TP, Mindestabstand, Haltedauer und Spread laufen über dieselben Funktionen wie live, ohne Überlappungsregel. Je Ziehung (`NULL_TEST_DRAWS` = 2000, Seed `NULL_TEST_SEED` = 12345) werden je Markt und Richtung so viele Kandidaten ohne Zurücklegen gezogen, wie die echten Haupt-Muster Trades hatten.
+- Ausgabe: Nullverteilung (Mittelwert, 5 %-, 95 %-, 99 %-Quantil) gegen das echte Ø R, p-Wert (Anteil der Ziehungen mit Ø R gleich oder größer), gepoolt, getrennt nach BUY und SELL und je Jahrzehnt, dazu die Drift-Baseline (Ø R aller Kandidaten ohne Ziehung), jeweils vor und nach Kosten.
+- Kriterien (vorab festgelegt, Werte in `config.py`), ausgegeben als Zahlen und Ja/Nein ohne Deutung: K1 Ø R vor Kosten größer als das 99 %-Quantil der Nullverteilung. K2 Ø R vor Kosten > 0 in mindestens 2 von 3 Jahrzehnten. K3 Ø R vor Kosten > 0 in mindestens 60 % der Märkte mit mindestens 30 Trades. K4 Ø R vor Kosten geteilt durch Cluster-SE größer als 3. K5 Ø R nach Kosten > 0.
+- Zusatzzahlen: Ø R je Markt (nur Märkte mit mindestens 30 Trades) für alle Richtungen, BUY und SELL mit Anzahl positiver Märkte, und gepoolt ohne BTC, ETH und GOLD.
+
+```bash
+python -m buchbot.backtest --markets ALL --interval 1d --no-sr --snapshot backtest_snapshot_1d.csv --null-test
+```
 
 Der Backtest verändert keine Signale. Die Zonen-Auswertung dient nur der Einschätzung.
 
