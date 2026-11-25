@@ -72,6 +72,8 @@ python -m buchbot.backtest --markets ALL        # alle zwölf Märkte, zusätzli
 python -m buchbot.backtest --markets ALL --snapshot backtest_snapshot.csv   # eingefrorener Datenstand
 python -m buchbot.backtest --markets EURUSD,GBPUSD
 python -m buchbot.backtest --markets ALL --sr-max-zones 3   # nur für den Vergleich: je Seite die 3 stärksten Zonen
+python -m buchbot.backtest --markets ALL --interval 1d --no-sr --snapshot backtest_snapshot_1d.csv   # Forschung auf Tagesdaten
+python -m buchbot.backtest --markets ALL --interval 1h --no-sr --snapshot backtest_snapshot_1h.csv   # Forschung auf Stundendaten
 ```
 
 Ausgabe: Tabelle mit für jedes Muster:
@@ -89,7 +91,18 @@ Zusätzlich je Markt (und bei mehreren Märkten gepoolt) ein **Zonen-Vergleich**
 
 `--sr-max-zones N` überschreibt `SR_MAX_ZONES_PER_SIDE` nur für den Backtest. Standard ist `None` (alle starken Zonen). Der Live-Bot ist davon nicht betroffen.
 
-`--snapshot DATEI.csv` friert den Datenstand ein: Beim ersten Lauf werden alle abgerufenen Kerzen in der Datei gespeichert (Dateien `*.csv` sind in `.gitignore`). Spätere Läufe mit derselben Option lesen daraus, ohne Abruf. Die Ausgabe nennt Abrufzeitpunkt und Zeitraum je Markt. Fehlt ein Markt in der Datei, wird er nachgeladen und ergänzt. Beispiel: `python -m buchbot.backtest --markets ALL --snapshot backtest_snapshot.csv`. Zwei Läufe mit demselben Snapshot liefern identische Ergebnisse, auch für `--sr-max-zones`.
+`--snapshot DATEI.csv` friert den Datenstand ein: Beim ersten Lauf werden alle abgerufenen Kerzen in der Datei gespeichert (Dateien `*.csv` sind in `.gitignore`). Spätere Läufe mit derselben Option lesen daraus, ohne Abruf. Die Ausgabe nennt Abrufzeitpunkt und Zeitraum je Markt. Fehlt ein Markt in der Datei, wird er nachgeladen und ergänzt. Die Datei kann mehrere Intervalle enthalten (Schlüssel Markt und Intervall). Beispiel: `python -m buchbot.backtest --markets ALL --snapshot backtest_snapshot.csv`. Zwei Läufe mit demselben Snapshot liefern identische Ergebnisse, auch für `--sr-max-zones`.
+
+#### Intervall, Kosten und Zeitaufteilung (Forschung, Schritt 13a)
+
+Zweck: Prüfen, ob die bestehenden Regeln (Muster, EMA-50-Trendfilter, ATR, SL/TP, Mindestabstand, Überlappungsregel) auch auf 1h- und 1d-Daten ein Ergebnis zeigen. Es wird nichts optimiert, alle Parameter bleiben wie in `config.py`. Der Live-Betrieb ist nicht betroffen.
+
+- `--interval {15m,30m,1h,1d}` überschreibt das Intervall aller gewählten Märkte nur für den Backtest. Zeitraum je Intervall (`BACKTEST_PERIOD_BY_INTERVAL` in `config.py`): 15m und 30m "60d", 1h "730d", 1d "max". Märkte mit weniger als `MIN_CANDLES_FOR_BACKTEST` (500) Kerzen werden mit Hinweis übersprungen.
+- `--no-sr` ruft die Zonen-Annotation nicht auf. Die `sr_*`-Spalten bleiben leer, die Signale und R-Werte sind unverändert.
+- `--spread {both,with,without}` (Standard `both`): Ergebnisse vor Kosten (Spread 0) und/oder nach Kosten. R vor Kosten = R nach Kosten + Spread / Risiko.
+- Zusätzlich zu den Zeithälften werden die Haupt-Muster-Tabellen nach Jahrzehnt der Signalzeit ausgegeben (bis 2009, 2010 bis 2019, ab 2020). Unter 30 Trades erscheint der Hinweis "zu wenige Fälle".
+- Die Ausgabe beginnt mit Datenstand (Abrufdatum und Zeitraum) und den verwendeten Parametern.
+- Beispiele: `python -m buchbot.backtest --markets ALL --interval 1d --no-sr --snapshot backtest_snapshot_1d.csv` und `--interval 1h --no-sr --snapshot backtest_snapshot_1h.csv`. Die Läufe je Intervall werden nacheinander gestartet.
 
 Der Backtest verändert keine Signale. Die Zonen-Auswertung dient nur der Einschätzung.
 

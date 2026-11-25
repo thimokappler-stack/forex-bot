@@ -192,6 +192,10 @@ MIN_SIGNALS_FOR_STATS = 30    # Minimum Signale für belastbare Backtest-Aussage
 ZONE_WARN_SHARE_HIGH = 0.80   # Zonen-Verteilung: eine Gruppe über diesem Anteil -> Warnung
 ZONE_WARN_SHARE_LOW = 0.05    # Zonen-Verteilung: eine Gruppe unter diesem Anteil -> Warnung
 BACKTEST_PERIOD = "60d"       # Historie für den Backtest (yfinance-Maximum für 15m)
+BACKTEST_PERIOD_BY_INTERVAL = {"15m": "60d", "30m": "60d", "1h": "730d", "1d": "max"}  # Zeitraum je Intervall (yfinance-Grenzen)
+BACKTEST_SPREAD_MODES = ("both", "with", "without")  # Ergebnis vor und nach Kosten (both), nur nach Kosten, nur vor Kosten
+MIN_CANDLES_FOR_BACKTEST = 500  # Märkte mit weniger brauchbaren Kerzen werden übersprungen
+DECADE_BOUNDARIES = (2010, 2020)  # Jahrzehnt-Aufteilung: bis 2009, 2010 bis 2019, ab 2020
 BACKTEST_CSV_FILE = "backtest_results.csv"  # Einzelsignale, relativ zum Projektordner
 
 # Detektoren, die nie per Mail laufen dürfen (Hintergrund-Analyse)

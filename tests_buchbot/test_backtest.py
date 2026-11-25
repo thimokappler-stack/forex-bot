@@ -1,3 +1,7 @@
+import csv
+import io
+from contextlib import redirect_stdout
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -121,7 +125,7 @@ def test_trade_whose_hold_window_exceeds_data_is_open_even_if_tp_is_touched():
 
 def test_open_trades_are_excluded_from_statistics():
     open_trade = {"pattern": "Morning Star", "outcome": "offen", "r": None}
-    tp_trade = {"pattern": "Morning Star", "outcome": "TP", "r": 1.95}
+    tp_trade = {"pattern": "Morning Star", "outcome": "TP", "r": 1.95, "r_gross": 2.0}
     rows, total = backtest.summarize([open_trade, tp_trade], backtest.MAIN_PATTERN_NAMES)
     stats = dict(rows)["Morning Star"]
     assert stats["n"] == 1
@@ -162,7 +166,7 @@ def test_neutral_signals_are_counted_with_dashes_for_results():
 
 
 def test_summary_groups_are_separate():
-    main = {"pattern": "Morning Star", "outcome": "TP", "r": 1.0}
+    main = {"pattern": "Morning Star", "outcome": "TP", "r": 1.0, "r_gross": 1.0}
     single = {"pattern": "Doji", "outcome": "nicht bewertet", "r": None}
     _, total = backtest.summarize([main, single], backtest.MAIN_PATTERN_NAMES)
     assert total["n"] == 1
@@ -191,7 +195,122 @@ def make_trade(direction="BUY", source="candles_main", outcome="TP", r=1.0, alig
             "swing_trend": trend, "sr_strong_zones": zones,
             "sr_strong_support": support, "sr_strong_resistance": resistance}
     return {"pattern": "Test", "source": source, "direction": direction, "outcome": outcome,
-            "r": r, "tags": tags, "market": market, "signal_time": time}
+            "r": r, "r_gross": r, "tags": tags, "market": market, "signal_time": time}
+
+
+def _walk(periods, start="2026-03-01 00:00", freq="15min"):
+    """Feste Zufallskurve (Seed 3) als Kerzen für den Backtest-Lauf ohne Netzwerk."""
+    rng = np.random.default_rng(3)
+    close = 1.1 + np.cumsum(rng.normal(0, 0.0004, periods))
+    index = pd.date_range(start, periods=periods, freq=freq, tz="UTC")
+    return pd.DataFrame({"open": np.r_[close[0], close[:-1]], "high": close + 0.0005,
+                         "low": close - 0.0005, "close": close}, index=index)
+
+
+@pytest.mark.parametrize("interval, period", [("1d", "max"), ("1h", "730d")])
+def test_interval_override_waehlt_zeitraum_des_intervalls(tmp_path, interval, period):
+    calls = []
+
+    def fetch(symbol, fetch_interval, lookback=None, period=None):
+        calls.append((fetch_interval, period))
+        return _walk(600, start="2020-01-01", freq="1D") if fetch_interval == "1d" else _walk(600, freq="1h")
+
+    with redirect_stdout(io.StringIO()):
+        backtest.main(markets=["EURUSD"], fetch=fetch, csv_path=tmp_path / "bt.csv", interval=interval, no_sr=True)
+    assert calls == [(interval, period)]
+
+
+def test_zu_wenige_kerzen_werden_uebersprungen_mit_hinweis(tmp_path):
+    out = io.StringIO()
+    with redirect_stdout(out):
+        status = backtest.main(markets=["EURUSD"], fetch=lambda *a, **k: _walk(300),
+                               csv_path=tmp_path / "bt.csv")
+    assert "übersprungen" in out.getvalue()
+    assert "=== " not in out.getvalue()
+    assert status == 0
+
+
+def test_no_sr_gibt_gleiche_signale_und_r_werte_wie_mit_zonen(tmp_path):
+    def fetch(*args, **kwargs):
+        return _walk(600)
+
+    with redirect_stdout(io.StringIO()):
+        backtest.main(markets=["EURUSD"], fetch=fetch, csv_path=tmp_path / "mit.csv")
+        backtest.main(markets=["EURUSD"], fetch=fetch, csv_path=tmp_path / "ohne.csv", no_sr=True)
+
+    def rows(path):
+        with open(path, encoding="utf-8-sig", newline="") as handle:
+            return list(csv.DictReader(handle, delimiter=";"))
+
+    with_zones, without_zones = rows(tmp_path / "mit.csv"), rows(tmp_path / "ohne.csv")
+    assert len(with_zones) == len(without_zones)
+    zone_fields = {"swing_trend"} | {f for f in backtest.CSV_FIELDS if f.startswith("sr_")}
+    signal_fields = [f for f in backtest.CSV_FIELDS if f not in zone_fields]
+    assert [{f: r[f] for f in signal_fields} for r in with_zones] == [{f: r[f] for f in signal_fields} for r in without_zones]
+    assert all(r["sr_relation"] == "" and r["swing_trend"] == "" for r in without_zones)
+
+
+def test_snapshot_eintrag_eines_anderen_intervalls_wird_nicht_benutzt(tmp_path):
+    snap = tmp_path / "snap.csv"
+    interval = default_config.for_market("EURUSD").INTERVAL
+    backtest.save_snapshot(snap, {("EURUSD", "1d"): (_walk(600, start="2020-01-01", freq="1D"),
+                                                    "2026-05-06T10:00:00+00:00")})
+    calls = []
+
+    def fetch(symbol, fetch_interval, lookback=None, period=None):
+        calls.append(fetch_interval)
+        return _walk(600)
+
+    with redirect_stdout(io.StringIO()):
+        backtest.main(markets=["EURUSD"], fetch=fetch, csv_path=tmp_path / "bt.csv", snapshot=snap)
+    assert calls == [interval]
+
+
+def test_spread_both_with_without_zahlenbeispiel():
+    df = make_df([candle(1.1005, 1.0995, 1.1000), candle(1.1045, 1.1000)])
+    signal = make_signal("BUY", 1.0980, 1.1040)
+    trade = backtest.simulate(signal, df, 0, make_config(SPREAD_PIPS=1.0))
+    # Risiko 20 Pips, Spread 1 Pip: R_vor_Kosten = R_nach_Kosten + Spread / Risiko = 1.95 + 0.05
+    assert trade["r"] == pytest.approx(1.95)
+    assert trade["r_gross"] == pytest.approx(trade["r"] + 1.0 / signal.risk_pips)
+    assert trade["r_gross"] == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize("spread, shown, hidden", [
+    ("both", ["Ø R vor K.", "Ø R nach K.", "Summe R vor K.", "Summe R nach K."], []),
+    ("with", ["Ø R", "Summe R"], ["vor K."]),
+    ("without", ["Ø R vor K.", "Summe R vor K."], ["nach K."]),
+])
+def test_render_table_zeigt_nur_gewaehlte_r_spalten(spread, shown, hidden):
+    trades = [make_trade(r=1.0), make_trade(r=-1.0)]
+    rows, total = backtest.summarize(trades, ["Test"])
+    out = backtest.render_table(rows, total, default_config, "T", spread)
+    for text in shown:
+        assert text in out
+    for text in hidden:
+        assert text not in out
+
+
+def test_r_spalten_unbekannter_modus_ist_fehler():
+    with pytest.raises(ValueError):
+        backtest._r_columns("gar nicht", False)
+
+
+def test_jahrzehnt_grenzen():
+    assert backtest.decade_label(pd.Timestamp("2009-12-31", tz="UTC")) == "bis 2009"
+    assert backtest.decade_label(pd.Timestamp("2010-01-01", tz="UTC")) == "2010-2019"
+    assert backtest.decade_label(pd.Timestamp("2019-12-31", tz="UTC")) == "2010-2019"
+    assert backtest.decade_label(pd.Timestamp("2020-01-01", tz="UTC")) == "ab 2020"
+
+
+def test_jahrzehnt_tabellen_zaehlen_trades_je_zeitraum():
+    times = [pd.Timestamp(f"{year}-06-01", tz="UTC") for year in (2005, 2015, 2016, 2021)]
+    trades = [make_trade(time=t) for t in times]
+    trades.append(dict(make_trade(time=times[0]), pattern="Doji"))
+    out = backtest.render_decade_tables(trades, ["Test"], default_config, "T", "with")
+    assert "Zeit bis 2009 (1 Trades)" in out
+    assert "Zeit 2010-2019 (2 Trades)" in out
+    assert "Zeit ab 2020 (1 Trades)" in out
 
 
 def test_zone_groups_assign_each_group_with_fixed_examples():

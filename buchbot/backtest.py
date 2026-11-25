@@ -71,7 +71,8 @@ def find_signals(df, config):
         after_trend = trend.apply(raw, view, config)
         after_sltp = sltp.apply(after_trend, config)
         # view endet bei pos, die SR-Zonen sehen also keine späteren Kerzen
-        after_sltp = annotate(after_sltp, view, config)
+        if config.SR_ENABLED:
+            after_sltp = annotate(after_sltp, view, config)
         for stage, signals in (("raw", raw), ("trend", after_trend), ("sltp", after_sltp)):
             funnel[stage].update(s.pattern for s in signals)
         found.extend((pos, signal) for signal in after_sltp)
@@ -93,6 +94,7 @@ def _trade(signal, df, pos, exit_pos, exit_price, outcome, config):
         "exit_price": exit_price,
         "outcome": outcome,
         "r": None,
+        "r_gross": None,
         "tags": signal.tags,
         "exit_pos": exit_pos,
     }
@@ -103,8 +105,9 @@ def _trade(signal, df, pos, exit_pos, exit_price, outcome, config):
             move = exit_price - signal.entry
         else:
             move = signal.entry - exit_price
-        net_pips = move / config.PIP_SIZE - config.SPREAD_PIPS
-        trade["r"] = net_pips / signal.risk_pips
+        gross_pips = move / config.PIP_SIZE
+        trade["r_gross"] = gross_pips / signal.risk_pips
+        trade["r"] = (gross_pips - config.SPREAD_PIPS) / signal.risk_pips
     return trade
 
 
@@ -181,9 +184,15 @@ def _std_error(values):
 
 
 def _stats(items):
-    """Zählt Trades ohne offene; Anteile und R nur aus bewerteten Trades."""
+    """Zählt Trades ohne offene; Anteile und R nur aus bewerteten Trades.
+
+    R nach Kosten (r) und vor Kosten (r_gross); der Standardfehler gilt für R nach Kosten (vor Kosten identisch,
+    da nur um eine Konstante verschoben).
+    """
     items = [t for t in items if t["outcome"] != OUTCOME_OPEN]
-    rs = [t["r"] for t in items if t["r"] is not None]
+    scored = [t for t in items if t["r"] is not None]
+    rs = [t["r"] for t in scored]
+    gross = [t["r_gross"] for t in scored]
     return {
         "n": len(items),
         "tp": sum(1 for t in items if t["outcome"] == OUTCOME_TP),
@@ -191,6 +200,8 @@ def _stats(items):
         "timeout": sum(1 for t in items if t["outcome"] == OUTCOME_TIMEOUT),
         "avg_r": sum(rs) / len(rs) if rs else None,
         "sum_r": sum(rs) if rs else None,
+        "avg_r_gross": sum(gross) / len(gross) if gross else None,
+        "sum_r_gross": sum(gross) if gross else None,
         "se": _std_error(rs),
     }
 
@@ -216,8 +227,40 @@ def _fmt_r(value):
     return "-" if value is None else f"{value:+.2f}"
 
 
-def render_table(rows, total, config, title):
-    header = f"{'Muster':<26}{'Anzahl':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}{'Ø R':>8}{'Summe R':>10}"
+def _r_columns(spread, with_se):
+    """R-Spalten als (Titel, Mindestbreite, Schlüssel): vor Kosten (Brutto), nach Kosten (Netto) oder beides."""
+    if spread not in default_config.BACKTEST_SPREAD_MODES:
+        raise ValueError(f"unbekannter Spread-Modus: {spread}")
+    if spread == "with":
+        avg, total = [("Ø R", 8, "avg_r")], [("Summe R", 10, "sum_r")]
+    elif spread == "without":
+        avg, total = [("Ø R vor K.", 11, "avg_r_gross")], [("Summe R vor K.", 15, "sum_r_gross")]
+    else:
+        avg = [("Ø R vor K.", 11, "avg_r_gross"), ("Ø R nach K.", 13, "avg_r")]
+        total = [("Summe R vor K.", 15, "sum_r_gross"), ("Summe R nach K.", 17, "sum_r")]
+    se = [("SE Ø R", 8, "se")] if with_se else []
+    return avg + se + total
+
+
+def _column_width(title, width):
+    return max(width, len(title) + 1)
+
+
+def _r_header(columns):
+    return "".join(f"{title:>{_column_width(title, width)}}" for title, width, _ in columns)
+
+
+def _r_values(stats, columns):
+    cells = []
+    for title, width, key in columns:
+        text = _fmt_se(stats[key]) if key == "se" else _fmt_r(stats[key])
+        cells.append(f"{text:>{_column_width(title, width)}}")
+    return "".join(cells)
+
+
+def render_table(rows, total, config, title, spread="with", with_se=False):
+    columns = _r_columns(spread, with_se)
+    header = f"{'Muster':<26}{'Anzahl':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}" + _r_header(columns)
     lines = [title, "", header, "-" * len(header)]
     notes = []
     for name, s in rows + [("GESAMT", total)]:
@@ -226,9 +269,9 @@ def render_table(rows, total, config, title):
         evaluated = s["tp"] + s["sl"] + s["timeout"]
         lines.append(
             f"{name:<26}{s['n']:>8}{_pct(s['tp'], evaluated):>6}{_pct(s['sl'], evaluated):>6}"
-            f"{_pct(s['timeout'], evaluated):>10}{_fmt_r(s['avg_r']):>8}{_fmt_r(s['sum_r']):>10}"
+            f"{_pct(s['timeout'], evaluated):>10}" + _r_values(s, columns)
         )
-        if name != "GESAMT" and s["n"] < config.MIN_SIGNALS_FOR_STATS:
+        if s["n"] < config.MIN_SIGNALS_FOR_STATS:
             notes.append(f"  {name}: zu wenige Fälle für eine belastbare Aussage "
                          f"({s['n']} < {config.MIN_SIGNALS_FOR_STATS})")
     if notes:
@@ -288,9 +331,9 @@ def _fmt_mean(value):
     return "-" if value is None else f"{value:.1f}"
 
 
-def _zone_group_lines(population, groups, config):
-    header = (f"{'Gruppe':<38}{'Anzahl':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}"
-              f"{'Ø R':>8}{'SE Ø R':>8}{'Summe R':>10}")
+def _zone_group_lines(population, groups, config, spread):
+    columns = _r_columns(spread, with_se=True)
+    header = f"{'Gruppe':<38}{'Anzahl':>8}{'TP':>6}{'SL':>6}{'Zeitabl.':>10}" + _r_header(columns)
     lines = [header, "-" * len(header)]
     notes = []
     for name, predicate in groups:
@@ -298,8 +341,7 @@ def _zone_group_lines(population, groups, config):
         evaluated = s["tp"] + s["sl"] + s["timeout"]
         lines.append(
             f"{name:<38}{s['n']:>8}{_pct(s['tp'], evaluated):>6}{_pct(s['sl'], evaluated):>6}"
-            f"{_pct(s['timeout'], evaluated):>10}{_fmt_r(s['avg_r']):>8}{_fmt_se(s['se']):>8}"
-            f"{_fmt_r(s['sum_r']):>10}"
+            f"{_pct(s['timeout'], evaluated):>10}" + _r_values(s, columns)
         )
         if s["n"] < config.MIN_SIGNALS_FOR_STATS:
             notes.append(f"  {name}: zu wenige Fälle ({s['n']} < {config.MIN_SIGNALS_FOR_STATS})")
@@ -352,9 +394,9 @@ def _header_lines(population, config, scope_title):
     return lines, warnings
 
 
-def _zone_tables(population, config):
-    zone_lines, zone_notes = _zone_group_lines(population, ZONE_GROUPS, config)
-    trend_lines, trend_notes = _zone_group_lines(population, TREND_GROUPS, config)
+def _zone_tables(population, config, spread="with"):
+    zone_lines, zone_notes = _zone_group_lines(population, ZONE_GROUPS, config, spread)
+    trend_lines, trend_notes = _zone_group_lines(population, TREND_GROUPS, config, spread)
     return ["Zonen-Gruppen:"] + zone_lines + ["Trend-Gruppen:"] + trend_lines + zone_notes + trend_notes
 
 
@@ -364,7 +406,7 @@ def signal_time_median(trades):
     return times[len(times) // 2] if times else None
 
 
-def render_zone_compare(trades, config, title, split_at=None):
+def render_zone_compare(trades, config, title, split_at=None, spread="with"):
     """Zonen-Vergleich je Musterbereich: Gruppen (Zonen und Trend) mit Statistik und Verteilung.
 
     split_at: optionaler Zeitpunkt; dann zusätzlich Tabellen für Signale davor und danach.
@@ -380,7 +422,7 @@ def render_zone_compare(trades, config, title, split_at=None):
             continue
         header, header_warnings = _header_lines(population, config, scope_title)
         out += header
-        out += _zone_tables(population, config)
+        out += _zone_tables(population, config, spread)
         dist_lines, warnings = _distribution_lines(
             population, ZONE_GROUPS + TREND_GROUPS, config, scope_title)
         out += ["Verteilung:"] + dist_lines + header_warnings + warnings
@@ -389,10 +431,38 @@ def render_zone_compare(trades, config, title, split_at=None):
             late = [t for t in population if t["signal_time"] >= split_at]
             cut = f"{split_at:%Y-%m-%d %H:%M} UTC"
             out += [f"Zeithälfte 1 (Signale vor {cut}): {len(early)} BUY/SELL-Signale"]
-            out += _zone_tables(early, config)
+            out += _zone_tables(early, config, spread)
             out += [f"Zeithälfte 2 (Signale ab {cut}): {len(late)} BUY/SELL-Signale"]
-            out += _zone_tables(late, config)
+            out += _zone_tables(late, config, spread)
     return "\n".join(out)
+
+
+def decade_labels():
+    first, second = default_config.DECADE_BOUNDARIES
+    return [f"bis {first - 1}", f"{first}-{second - 1}", f"ab {second}"]
+
+
+def decade_label(time):
+    """Jahrzehnt einer Signalzeit; Grenzen aus DECADE_BOUNDARIES, Bezeichnungen wie in decade_labels()."""
+    first, second = default_config.DECADE_BOUNDARIES
+    labels = decade_labels()
+    if time.year < first:
+        return labels[0]
+    if time.year < second:
+        return labels[1]
+    return labels[2]
+
+
+def render_decade_tables(trades, names, config, title, spread):
+    """Tabellen je Jahrzehnt der Signalzeit für die Muster in names."""
+    out = []
+    for label in decade_labels():
+        part = [t for t in trades if decade_label(t["signal_time"]) == label]
+        count = sum(1 for t in part if t["pattern"] in names)
+        rows, total = summarize(part, names)
+        out.append(render_table(rows, total, config, f"{title}, Zeit {label} ({count} Trades)",
+                                spread, with_se=True))
+    return "\n\n".join(out)
 
 
 def render_funnel(funnel, names, title):
@@ -448,7 +518,7 @@ def write_csv(trades, path):
             writer.writerow(row)
 
 
-def _print_report(df, cfg, trades, funnel):
+def _print_report(df, cfg, trades, funnel, spread, no_sr):
     main_rows, main_total = summarize(trades, MAIN_PATTERN_NAMES)
     single_rows, single_total = summarize(trades, SINGLE_PATTERN_NAMES)
     evaluated_candles = len(range(first_position(cfg), len(df) - 1))
@@ -459,39 +529,42 @@ def _print_report(df, cfg, trades, funnel):
         f"(Warmlauf {first_position(cfg)})"
     )
     print()
-    print(render_table(main_rows, main_total, cfg, "Haupt-Muster"))
+    print(render_table(main_rows, main_total, cfg, "Haupt-Muster", spread, with_se=True))
+    print()
+    print(render_decade_tables(trades, MAIN_PATTERN_NAMES, cfg, f"Haupt-Muster {cfg.MARKET}", spread))
     print()
     print(render_table(single_rows, single_total, cfg,
-                       "Einzelkerzen (Hintergrund, NEUTRAL nur gezählt, nicht bewertet)"))
+                       "Einzelkerzen (Hintergrund, NEUTRAL nur gezählt, nicht bewertet)", spread))
     print(f"\noffen: {open_count(trades)} (Haltefenster reicht über das Datenende, nicht in der Statistik)")
     print()
     print(render_funnel(funnel, MAIN_PATTERN_NAMES, "Trichter Haupt-Muster (Kerzen mit Treffer, nicht Trades)"))
     print()
     print(render_funnel(funnel, SINGLE_PATTERN_NAMES, "Trichter Einzelkerzen (Hintergrund)"))
     print()
-    print(render_zone_compare(trades, cfg, f"Zonen-Vergleich {cfg.DISPLAY_SYMBOL} ({cfg.MARKET})"))
-    print()
+    if not no_sr:
+        print(render_zone_compare(trades, cfg, f"Zonen-Vergleich {cfg.DISPLAY_SYMBOL} ({cfg.MARKET})", spread=spread))
+        print()
 
 
 SNAPSHOT_COLUMNS = ["market", "interval", "fetched_at", "time_utc", "open", "high", "low", "close"]
 
 
 def load_snapshot(path):
-    """Liest den Datenstand als {Markt: (DataFrame, Intervall, Abrufzeit)}, Zeiten in UTC, Reihenfolge der Datei."""
+    """Liest den Datenstand als {(Markt, Intervall): (DataFrame, Abrufzeit)}, Zeiten in UTC, Reihenfolge der Datei."""
     raw = pd.read_csv(path, sep=";",
                       dtype={"market": str, "interval": str, "fetched_at": str, "time_utc": str})
     entries = {}
-    for market, part in raw.groupby("market", sort=False):
+    for (market, interval), part in raw.groupby(["market", "interval"], sort=False):
         df = part[["open", "high", "low", "close"]].astype(float).reset_index(drop=True)
         df.index = pd.to_datetime(part["time_utc"].to_numpy(), utc=True)
-        entries[market] = (df, part["interval"].iloc[0], part["fetched_at"].iloc[0])
+        entries[(market, interval)] = (df, part["fetched_at"].iloc[0])
     return entries
 
 
 def save_snapshot(path, entries):
-    """Schreibt alle Märkte in eine Datei; zuerst temporäre Datei, dann ersetzen."""
+    """Schreibt alle Märkte je Intervall in eine Datei; zuerst temporäre Datei, dann ersetzen."""
     frames = []
-    for market, (df, interval, fetched_at) in entries.items():
+    for (market, interval), (df, fetched_at) in entries.items():
         part = df[["open", "high", "low", "close"]].reset_index(drop=True)
         part.insert(0, "time_utc", [ts.isoformat() for ts in df.index])
         part.insert(0, "fetched_at", fetched_at)
@@ -504,25 +577,32 @@ def save_snapshot(path, entries):
     os.replace(tmp, path)
 
 
-def default_csv_path(markets=None):
-    """Einzelmarkt-Lauf: backtest_results_<MARKT>.csv, sonst backtest_results.csv (überschreibt sich nicht gegenseitig)."""
+def default_csv_path(markets=None, interval=None):
+    """Einzelmarkt: backtest_results_<MARKT>.csv, sonst BACKTEST_CSV_FILE; mit --interval je ein Suffix _<Intervall>."""
+    suffix = f"_{interval}" if interval else ""
     if markets and len(markets) == 1:
-        return BASE_DIR / f"backtest_results_{markets[0]}.csv"
-    return BASE_DIR / default_config.BACKTEST_CSV_FILE
+        return BASE_DIR / f"backtest_results_{markets[0]}{suffix}.csv"
+    base = Path(default_config.BACKTEST_CSV_FILE)
+    return BASE_DIR / f"{base.stem}{suffix}{base.suffix}"
 
 
-def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snapshot=None):
-    """Backtest je Markt, bei mehreren Märkten zusätzlich gepoolter Zonen-Vergleich mit Zeithälften. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte.
+def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snapshot=None,
+         interval=None, no_sr=False, spread="both"):
+    """Backtest je Markt, bei mehreren Märkten zusätzlich gepoolte Tabellen. Gibt 1 zurück, wenn ein Markt keine Kerzen hatte.
 
     sr_max_zones überschreibt SR_MAX_ZONES_PER_SIDE aus config.py (None = Standardwert aus config.py).
-    snapshot: CSV-Datei mit eingefrorenen Kerzen. Fehlt sie, wird abgerufen und gespeichert; vorhandene Märkte werden daraus gelesen.
+    snapshot: CSV-Datei mit eingefrorenen Kerzen je Markt und Intervall. Fehlt ein Eintrag, wird abgerufen und gespeichert.
+    interval: überschreibt das Intervall aller Märkte nur für diesen Lauf (Zeitraum aus BACKTEST_PERIOD_BY_INTERVAL).
+    no_sr: annotate nicht aufrufen, keine Zonen-Tabellen.
+    spread: "both", "with" (nach Kosten) oder "without" (vor Kosten).
     """
     names = list(markets) if markets else list(default_config.MARKETS)
     max_zones = default_config.SR_MAX_ZONES_PER_SIDE if sr_max_zones is None else sr_max_zones
     snapshot = Path(snapshot) if snapshot else None
     snapshot_entries = load_snapshot(snapshot) if snapshot and snapshot.exists() else {}
     fetched_any = False
-    print(f"Starke Zonen je Seite: {'alle' if max_zones is None else max_zones}\n")
+    print(f"Starke Zonen je Seite: {'alle' if max_zones is None else max_zones}"
+          f"{' (Zonen aus, --no-sr)' if no_sr else ''}\n")
     status = 0
     all_trades = []
     run_start = time.perf_counter()
@@ -530,9 +610,13 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snap
         market_start = time.perf_counter()
         cfg = default_config.for_market(name)
         cfg.SR_MAX_ZONES_PER_SIDE = max_zones
-        cached = snapshot_entries.get(name)
-        if cached is not None and cached[1] == cfg.INTERVAL:
-            raw, _, fetched_at = cached
+        cfg.SR_ENABLED = cfg.SR_ENABLED and not no_sr
+        if interval:
+            cfg.INTERVAL = interval
+            cfg.BACKTEST_PERIOD = default_config.BACKTEST_PERIOD_BY_INTERVAL[interval]
+        cached = snapshot_entries.get((name, cfg.INTERVAL))
+        if cached is not None:
+            raw, fetched_at = cached
             origin = "aus Snapshot"
         else:
             raw = fetch(cfg.SYMBOL, cfg.INTERVAL, lookback=None, period=cfg.BACKTEST_PERIOD)
@@ -542,29 +626,45 @@ def main(markets=None, fetch=get_candles, csv_path=None, sr_max_zones=None, snap
                 continue
             fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
             origin = "neu abgerufen"
-            snapshot_entries[name] = (raw, cfg.INTERVAL, fetched_at)
+            snapshot_entries[(name, cfg.INTERVAL)] = (raw, fetched_at)
             fetched_any = True
-        if snapshot:
-            print(f"Datenstand {cfg.MARKET}: {origin}, abgerufen {fetched_at} UTC, Kerzen "
-                  f"{raw.index[0]:%Y-%m-%d %H:%M} bis {raw.index[-1]:%Y-%m-%d %H:%M} UTC ({len(raw)})")
+        print(f"Datenstand {cfg.MARKET} ({cfg.INTERVAL}): {origin}, abgerufen {fetched_at} UTC, Kerzen "
+              f"{raw.index[0]:%Y-%m-%d %H:%M} bis {raw.index[-1]:%Y-%m-%d %H:%M} UTC ({len(raw)})")
         df = remove_incomplete_candle(raw, cfg.INTERVAL, now=pd.Timestamp(fetched_at))
+        if len(df) < default_config.MIN_CANDLES_FOR_BACKTEST:
+            print(f"[{cfg.MARKET}] Nur {len(df)} Kerzen (Minimum {default_config.MIN_CANDLES_FOR_BACKTEST}), "
+                  f"übersprungen. Zeitraum ggf. zu kurz für {cfg.INTERVAL}.\n")
+            continue
+        print(f"Parameter {cfg.MARKET}: Intervall {cfg.INTERVAL}, Zeitraum {cfg.BACKTEST_PERIOD}, "
+              f"MAX_HOLD_CANDLES {cfg.MAX_HOLD_CANDLES}, Spread {cfg.SPREAD_PIPS} Pips, "
+              f"SL_BUFFER_ATR {cfg.SL_BUFFER_ATR}, RISK_REWARD {cfg.RISK_REWARD}, "
+              f"TREND_EMA_PERIOD {cfg.TREND_EMA_PERIOD}, ATR_PERIOD {cfg.ATR_PERIOD}")
         trades, funnel = run_backtest(df, cfg)
         for trade in trades:
             trade["market"] = cfg.MARKET
             trade["decimals"] = cfg.PRICE_DECIMALS
         all_trades.extend(trades)
-        _print_report(df, cfg, trades, funnel)
+        _print_report(df, cfg, trades, funnel, spread, no_sr)
         print(f"Laufzeit {cfg.MARKET}: {time.perf_counter() - market_start:.1f} s\n")
 
     if snapshot and fetched_any:
         save_snapshot(snapshot, snapshot_entries)
         print(f"Snapshot gespeichert: {snapshot}\n")
     if len(names) > 1:
-        print(render_zone_compare(all_trades, default_config,
-                                  "Zonen-Vergleich GESAMT (alle Märkte gepoolt)",
-                                  split_at=signal_time_median(all_trades)))
+        split_at = signal_time_median(all_trades)
+        pooled_rows, pooled_total = summarize(all_trades, MAIN_PATTERN_NAMES)
+        print(render_table(pooled_rows, pooled_total, default_config,
+                           "Haupt-Muster GESAMT (alle Märkte gepoolt)", spread, with_se=True))
         print()
-    path = csv_path or default_csv_path(markets)
+        print(render_decade_tables(all_trades, MAIN_PATTERN_NAMES, default_config,
+                                   "Haupt-Muster GESAMT", spread))
+        print()
+        if not no_sr:
+            print(render_zone_compare(all_trades, default_config,
+                                      "Zonen-Vergleich GESAMT (alle Märkte gepoolt)",
+                                      split_at=split_at, spread=spread))
+            print()
+    path = csv_path or default_csv_path(markets, interval)
     write_csv(all_trades, path)
     print(f"Einzelsignale: {path}")
     print(f"Laufzeit gesamt ({len(names)} Märkte): {time.perf_counter() - run_start:.1f} s")
@@ -610,11 +710,19 @@ def cli(argv=None):
     parser.add_argument("--sr-max-zones", type=_parse_max_zones, default=None,
                         help="Je Seite nur die N starken Zonen mit den meisten Berührungen (überschreibt SR_MAX_ZONES_PER_SIDE)")
     parser.add_argument("--snapshot", type=_parse_snapshot, default=None,
-                        help="CSV mit eingefrorenen Kerzen: fehlt sie, wird abgerufen und gespeichert, sonst daraus gelesen")
+                        help="CSV mit eingefrorenen Kerzen je Markt und Intervall: fehlt ein Eintrag, wird abgerufen und gespeichert, sonst daraus gelesen")
+    parser.add_argument("--interval", choices=list(default_config.BACKTEST_PERIOD_BY_INTERVAL), default=None,
+                        help="Intervall nur für den Backtest (Zeitraum aus BACKTEST_PERIOD_BY_INTERVAL); Standard: Intervall des Markts")
+    parser.add_argument("--no-sr", action="store_true",
+                        help="Zonen nicht berechnen (sr-Spalten bleiben leer, keine Zonen-Tabellen)")
+    parser.add_argument("--spread", choices=list(default_config.BACKTEST_SPREAD_MODES), default="both",
+                        help="R nach Kosten (with), vor Kosten (without) oder beides (both, Standard)")
     args = parser.parse_args(argv)
+    options = dict(sr_max_zones=args.sr_max_zones, snapshot=args.snapshot, interval=args.interval,
+                   no_sr=args.no_sr, spread=args.spread)
     if args.market:
-        return main(markets=[args.market], sr_max_zones=args.sr_max_zones, snapshot=args.snapshot)
-    return main(markets=args.markets, sr_max_zones=args.sr_max_zones, snapshot=args.snapshot)
+        return main(markets=[args.market], **options)
+    return main(markets=args.markets, **options)
 
 
 if __name__ == "__main__":

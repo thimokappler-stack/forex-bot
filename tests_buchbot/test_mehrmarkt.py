@@ -248,7 +248,7 @@ def test_backtest_gibt_tabelle_je_markt_und_uebergibt_period(tmp_path):
 
     def fetch(symbol, interval, lookback=None, period=None):
         calls.append((symbol, period))
-        return make_candles(periods=300, start="2026-04-01 00:00")
+        return make_candles(periods=600, start="2026-04-01 00:00")
 
     out = io.StringIO()
     with redirect_stdout(out):
@@ -266,7 +266,7 @@ def test_snapshot_zweiter_lauf_liest_datei_und_liefert_identische_csv(tmp_path):
     snap = tmp_path / "snap.csv"
 
     def fetch(symbol, interval, lookback=None, period=None):
-        return make_candles(periods=300, start="2026-04-01 00:00")
+        return make_candles(periods=600, start="2026-04-01 00:00")
 
     first, second = io.StringIO(), io.StringIO()
     with redirect_stdout(first):
@@ -283,7 +283,7 @@ def test_snapshot_signalzahl_bleibt_mit_und_ohne_sr_max_zones_gleich(tmp_path):
     snap = tmp_path / "snap.csv"
 
     def fetch(symbol, interval, lookback=None, period=None):
-        return make_candles(periods=300, start="2026-04-01 00:00")
+        return make_candles(periods=600, start="2026-04-01 00:00")
 
     with redirect_stdout(io.StringIO()):
         backtest.main(markets=["BTC", "EURUSD"], fetch=fetch, csv_path=str(tmp_path / "a.csv"), snapshot=snap)
@@ -297,27 +297,28 @@ def test_snapshot_roundtrip_behaelt_preise_und_utc_zeiten(tmp_path):
     snap = tmp_path / "snap.csv"
     df = make_candles(periods=5)
     df["close"] = [1.0987654321 + i * 1e-7 for i in range(5)]
-    backtest.save_snapshot(snap, {"EURUSD": (df, "15m", "2026-05-06T10:00:00+00:00")})
-    loaded, interval, fetched_at = backtest.load_snapshot(snap)["EURUSD"]
+    backtest.save_snapshot(snap, {("EURUSD", "15m"): (df, "2026-05-06T10:00:00+00:00")})
+    loaded, fetched_at = backtest.load_snapshot(snap)[("EURUSD", "15m")]
     pd.testing.assert_frame_equal(loaded, df, check_freq=False, check_exact=True)
-    assert (interval, fetched_at) == ("15m", "2026-05-06T10:00:00+00:00")
+    assert fetched_at == "2026-05-06T10:00:00+00:00"
 
 
 def test_snapshot_fehlender_markt_wird_nachgeladen(tmp_path):
     snap = tmp_path / "snap.csv"
     interval = for_market("EURUSD").INTERVAL
-    backtest.save_snapshot(snap, {"EURUSD": (make_candles(periods=300, start="2026-04-01 00:00"), interval,
-                                             "2026-05-06T10:00:00+00:00")})
+    backtest.save_snapshot(snap, {("EURUSD", interval): (make_candles(periods=600, start="2026-04-01 00:00"),
+                                                        "2026-05-06T10:00:00+00:00")})
     calls = []
 
     def fetch(symbol, interval, lookback=None, period=None):
         calls.append(symbol)
-        return make_candles(periods=300, start="2026-04-01 00:00")
+        return make_candles(periods=600, start="2026-04-01 00:00")
 
     with redirect_stdout(io.StringIO()):
         backtest.main(markets=["EURUSD", "BTC"], fetch=fetch, csv_path=str(tmp_path / "bt.csv"), snapshot=snap)
     assert calls == ["BTC-USD"]
-    assert set(backtest.load_snapshot(snap)) == {"EURUSD", "BTC"}
+    btc_interval = for_market("BTC").INTERVAL
+    assert set(backtest.load_snapshot(snap)) == {("EURUSD", interval), ("BTC", btc_interval)}
 
 
 def test_snapshot_muss_csv_sein():
